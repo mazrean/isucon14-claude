@@ -13,7 +13,7 @@ RuntimeDirectory=isuride
 RuntimeDirectoryMode=0755
 Environment=STATS=1
 Environment=NEARBY_MAX_HOLD=8s
-Environment=NEARBY_PER_CHAIR=16
+Environment=NEARBY_PER_CHAIR=32
 # Environment=GOMAXPROCS=2
 
 User=isucon
