@@ -67,7 +67,7 @@ func init() {
 			tlN := timelineN
 			timelineSum, timelineN = [7]float64{}, 0
 			mu.Unlock()
-			slog.Info("stats", "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers,
+			slog.Info("stats", "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers, "nearby_waiters", len(nearbyWaiters),
 				"nearby", cntNearby.Swap(0), "nearby_empty", cntNearbyEmpty.Swap(0), "post_rides", cntPostRides.Swap(0),
 				"sales", cntSales.Load(), "owner_chairs", cntOwnerChairs.Load(), "post_chairs", cntPostChairs.Load(), "owners", len(owners), "timeline_n", tlN, "timeline_ms", tl)
 		}

@@ -416,40 +416,23 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mu.Lock()
-	nearby := []appGetNearbyChairsResponseChair{}
-	// 完了直後の椅子はベンチ側の状態反映が遅れるので含めない (完了 3s 以内は欠落が許容される)
-	recent := time.Now().Add(-nearbyCompletedGrace)
-	for _, c := range chairList {
-		if !c.IsActive || c.Busy || !c.HasLocation {
-			continue
-		}
-		if c.LastRide != nil && c.LastRide.UpdatedAt.After(recent) {
-			continue
-		}
-		if calculateDistance(lat, lon, c.Latitude, c.Longitude) <= distance {
-			nearby = append(nearby, appGetNearbyChairsResponseChair{
-				ID: c.ID, Name: c.Name, Model: c.Model,
-				CurrentCoordinate: Coordinate{Latitude: c.Latitude, Longitude: c.Longitude},
-			})
-		}
+	nearby := collectNearby(lat, lon, distance)
+	var wt *nearbyWaiter
+	if len(nearby) == 0 && nearbyMaxHold > 0 {
+		wt = &nearbyWaiter{lat: lat, lon: lon, dist: distance, ch: make(chan []appGetNearbyChairsResponseChair, 1)}
+		nearbyWaiters = append(nearbyWaiters, wt)
 	}
 	mu.Unlock()
 
 	cntNearby.Add(1)
-	if len(nearby) == 0 {
-		cntNearbyEmpty.Add(1)
-	}
-	if len(nearby) == 0 && nearbyEmptyDelay > 0 {
-		// 空き椅子が無いとユーザーは即座に再試行を繰り返す。応答を遅らせて空回りを抑え、
-		// ベンチの CPU を椅子の移動 (= スコア) に回させる
-		time.Sleep(nearbyEmptyDelay)
+	if wt != nil {
+		nearby = wt.wait(r)
+		if len(nearby) == 0 {
+			cntNearbyEmpty.Add(1)
+		}
 	}
 	writeJSON(w, http.StatusOK, &appGetNearbyChairsResponse{Chairs: nearby, RetrievedAt: time.Now().UnixMilli()})
 }
-
-const nearbyCompletedGrace = 1500 * time.Millisecond
-
-var nearbyEmptyDelay = envDuration("NEARBY_EMPTY_DELAY", 100*time.Millisecond)
 
 func calculateFare(pickupLatitude, pickupLongitude, destLatitude, destLongitude int) int {
 	meteredFare := farePerDistance * calculateDistance(pickupLatitude, pickupLongitude, destLatitude, destLongitude)

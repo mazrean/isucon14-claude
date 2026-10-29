@@ -62,7 +62,9 @@ type Chair struct {
 	Busy           bool  // 未完了のライドを持つ
 	CompletedCount int
 	EvaluationSum  int
-	Completed      []*Ride // 完了したライド (完了順)
+	Completed      []*Ride   // 完了したライド (完了順)
+	NearbyGranted  int       // nearby で起こしたユーザー数 (割り当て or 一定時間でリセット)
+	NearbyGrantAt  time.Time // 最後に起こした時刻
 
 	Notifier *Notifier
 }
@@ -125,16 +127,16 @@ var (
 	usernames          map[string]struct{}
 	invitationUseCount map[string]int
 
-	owners              map[string]*Owner
-	ownersByToken       map[string]*Owner
-	ownersByRegister    map[string]*Owner
-	ownerNames          map[string]struct{}
-	chairs              map[string]*Chair
-	chairsByToken       map[string]*Chair
-	chairList           []*Chair
-	rides               map[string]*Ride
-	waitingRides        []*Ride
-	chairModelSpeed     map[string]int
+	owners           map[string]*Owner
+	ownersByToken    map[string]*Owner
+	ownersByRegister map[string]*Owner
+	ownerNames       map[string]struct{}
+	chairs           map[string]*Chair
+	chairsByToken    map[string]*Chair
+	chairList        []*Chair
+	rides            map[string]*Ride
+	waitingRides     []*Ride
+	chairModelSpeed  map[string]int
 )
 
 func resetStore() {

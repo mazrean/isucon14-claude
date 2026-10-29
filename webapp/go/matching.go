@@ -31,6 +31,7 @@ func matchingLoop() {
 		}
 		mu.Lock()
 		runMatching()
+		dispatchNearby()
 		mu.Unlock()
 	}
 }
@@ -111,6 +112,7 @@ func assign(r *Ride, c *Chair) {
 	r.UpdatedAt = now()
 	r.MatchedAt = r.UpdatedAt
 	c.Busy = true
+	c.NearbyGranted = 0
 	c.LastRide = r
 	persistRide(r)
 	c.Notifier.push(chairEvent(r, "MATCHING"))
