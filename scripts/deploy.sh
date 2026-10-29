@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Idempotent, non-interactive deploy.
-#   APP node (isucon14-1): binary, sql, env.sh, nginx, systemd units, sysctl
-#   DB  node (isucon14-2): mysql config, sysctl
+#   NGINX node: nginx (+ upstream pointing at APP_UPSTREAM), sysctl
+#   APP   node: binary, sql, env.sh (ISUCON_DB_HOST=DB_PRIVATE_IP), systemd units, sysctl
+#   DB    node: mysql config, sysctl
+# Defaults = main env (nginx isucon14-1 / app isucon14-2 / MySQL isucon14-3).
+# Example (exp env, nginx node1 / app node2 / db node3):
+#   NGINX_HOST=isucon14-exp-1 APP_HOST=isucon14-exp-2 DB_HOST=isucon14-exp-3 \
+#   APP_UPSTREAM=10.100.0.47:8080 DB_PRIVATE_IP=10.100.0.20 ./scripts/deploy.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP=${APP_HOST:-isucon14-1}
-DB=${DB_HOST:-isucon14-2}
+APP=${APP_HOST:-isucon14-2}
+DB=${DB_HOST:-isucon14-3}
+NGINX=${NGINX_HOST:-isucon14-1}
+# address MySQL is reachable at from the app node
+DB_PRIVATE_IP=${DB_PRIVATE_IP:-10.100.0.19}
+# nginx upstream "server" value (host:port or unix:/path)
+APP_UPSTREAM=${APP_UPSTREAM:-10.100.0.176:8080}
 BIN=${BIN:-webapp/go/isuride}
 # MATCHER=1 keeps the curl-based isuride-matcher running (only needed by the original app)
 MATCHER=${MATCHER:-0}
@@ -18,46 +28,70 @@ rs() { # rs <src> <host:dst> [extra rsync args...]
 }
 remote() { local h=$1; shift; ssh $SSH_OPTS "$h" "$@"; }
 
-TMPF=$(mktemp)
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+sed -E "s|^ISUCON_DB_HOST=.*|ISUCON_DB_HOST=\"$DB_PRIVATE_IP\"|" env.sh >"$WORK/env.sh"
+sed -E "s|^(\s*server )127\.0\.0\.1:8080;|\1$APP_UPSTREAM;|" etc/nginx/sites-available/isuride.conf >"$WORK/isuride.conf"
+
 echo "==> [$DB] mysql config + sysctl"
-rs etc/mysql/mysql.conf.d/zz-isucon.cnf "$DB:/etc/mysql/mysql.conf.d/zz-isucon.cnf" --chown=root:root --chmod=F644 -i | tee "$TMPF" >/dev/null || true
+rs etc/mysql/mysql.conf.d/zz-isucon.cnf "$DB:/etc/mysql/mysql.conf.d/zz-isucon.cnf" --chown=root:root --chmod=F644 -i | tee "$WORK/dbsync" >/dev/null || true
 rs etc/sysctl.d/99-isucon.conf "$DB:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
-DB_CHANGED=$(grep -c '^<f' "$TMPF" || true); rm -f "$TMPF"
+DB_CHANGED=$(grep -c '^<f' "$WORK/dbsync" || true)
 remote "$DB" "sudo sysctl -q --system >/dev/null; sudo systemctl enable mysql >/dev/null 2>&1; \
   if [ '$DB_CHANGED' != '0' ] || ! systemctl is-active -q mysql; then echo 'restarting mysql'; sudo systemctl restart mysql; fi; \
   sudo mysql -e \"CREATE DATABASE IF NOT EXISTS isuride DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci; \
     CREATE USER IF NOT EXISTS 'isucon'@'%' IDENTIFIED BY 'isucon'; GRANT ALL ON isuride.* TO 'isucon'@'%';\""
 
-echo "==> [$APP] binary, sql, env.sh"
+echo "==> [$APP] binary, sql, env.sh (DB=$DB_PRIVATE_IP), systemd, sysctl"
 rs "$BIN" "$APP:/home/isucon/webapp/go/isuride" --chown=isucon:isucon --chmod=F755
 rs webapp/sql/ "$APP:/home/isucon/webapp/sql/" --chown=isucon:isucon
-rs env.sh "$APP:/home/isucon/env.sh" --chown=isucon:isucon --chmod=F755
-
-echo "==> [$APP] nginx, systemd, sysctl"
-rs etc/nginx/nginx.conf "$APP:/etc/nginx/nginx.conf" --chown=root:root
-rs etc/nginx/sites-available/isuride.conf "$APP:/etc/nginx/sites-available/isuride.conf" --chown=root:root
+rs "$WORK/env.sh" "$APP:/home/isucon/env.sh" --chown=isucon:isucon --chmod=F755
 rs etc/systemd/system/ "$APP:/etc/systemd/system/" --chown=root:root --include='isuride-*.service' --exclude='*'
 rs etc/sysctl.d/99-isucon.conf "$APP:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
 
-remote "$APP" "MATCHER=$MATCHER bash -s" <<'REMOTE'
+if [ "$NGINX" != "$APP" ]; then
+  echo "==> [$NGINX] nginx, sysctl (upstream $APP_UPSTREAM)"
+  rs etc/sysctl.d/99-isucon.conf "$NGINX:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
+else
+  echo "==> [$NGINX] nginx (upstream $APP_UPSTREAM)"
+fi
+rs etc/nginx/nginx.conf "$NGINX:/etc/nginx/nginx.conf" --chown=root:root
+rs "$WORK/isuride.conf" "$NGINX:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
+
+# every node: stop services it does not own
+for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" | sort -u); do
+  ROLES=""
+  [ "$h" = "$APP" ] && ROLES="$ROLES app"
+  [ "$h" = "$NGINX" ] && ROLES="$ROLES nginx"
+  [ "$h" = "$DB" ] && ROLES="$ROLES db"
+  remote "$h" "ROLES='$ROLES' MATCHER=$MATCHER bash -s" <<'REMOTE'
 set -e
 cd /
-  sudo sysctl -q --system >/dev/null
-  # precompress static assets for gzip_static (idempotent)
-  sudo -u isucon find /home/isucon/webapp/public -type f \( -name "*.js" -o -name "*.css" -o -name "*.html" -o -name "*.svg" -o -name "*.json" \) -exec gzip -kf9 {} +
+has() { case " $ROLES " in *" $1 "*) return 0;; esac; return 1; }
+sudo sysctl -q --system >/dev/null
+DISABLE="isuride-payment_mock"
+has app || DISABLE="$DISABLE isuride-go isuride-matcher"
+has app && [ "$MATCHER" != 1 ] && DISABLE="$DISABLE isuride-matcher"
+has nginx || DISABLE="$DISABLE nginx"
+has db || DISABLE="$DISABLE mysql"
+for s in $DISABLE; do
+  if systemctl is-enabled -q $s 2>/dev/null || systemctl is-active -q $s; then sudo systemctl disable --now -q $s; fi
+done
+if has app; then
   sudo systemctl daemon-reload
-  # matcher / payment_mock / local mysql are not used
-  DISABLE="isuride-payment_mock mysql"
-  if [ "$MATCHER" = 1 ]; then sudo systemctl enable -q isuride-matcher; sudo systemctl restart isuride-matcher; else DISABLE="isuride-matcher $DISABLE"; fi
-  for s in $DISABLE; do
-    if systemctl is-enabled -q $s 2>/dev/null || systemctl is-active -q $s; then sudo systemctl disable --now $s; fi
-  done
-  sudo systemctl enable -q isuride-go nginx
+  if [ "$MATCHER" = 1 ]; then sudo systemctl enable -q isuride-matcher; sudo systemctl restart isuride-matcher; fi
+  sudo systemctl enable -q isuride-go
   sudo systemctl restart isuride-go
-  sudo nginx -t -q && sudo systemctl reload-or-restart nginx
-  for i in $(seq 1 30); do
+  for i in $(seq 1 60); do
     curl -s -o /dev/null -m 2 http://127.0.0.1:8080/api/app/nearby-chairs && break; sleep 0.5
   done
-  systemctl is-active isuride-go nginx
+fi
+if has nginx; then
+  # precompress static assets for gzip_static (idempotent)
+  sudo -u isucon find /home/isucon/webapp/public -type f \( -name "*.js" -o -name "*.css" -o -name "*.html" -o -name "*.svg" -o -name "*.json" \) -exec gzip -kf9 {} +
+  sudo systemctl enable -q nginx
+  sudo nginx -t -q && sudo systemctl reload-or-restart nginx
+fi
+echo "  $(hostname):$ROLES -> $(systemctl is-active isuride-go nginx mysql | tr '\n' ' ')"
 REMOTE
+done
 echo "==> deploy done"
