@@ -1,28 +1,66 @@
 package main
 
 import (
+	"context"
 	crand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"github.com/oklog/ulid/v2"
 )
 
-var db *sqlx.DB
+var (
+	db           *sqlx.DB
+	shutdownCh   = make(chan struct{})
+	errNoFlusher = errors.New("streaming unsupported")
+)
+
+type ctxKey int
+
+const (
+	ctxUser ctxKey = iota
+	ctxOwner
+	ctxChair
+)
 
 func main() {
 	mux := setup()
+
+	srv := &http.Server{Handler: mux, IdleTimeout: 120 * time.Second}
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		panic(err)
+	}
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+		<-sig
+		slog.Info("shutting down")
+		close(shutdownCh)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+		flushPersist()
+		os.Exit(0)
+	}()
 	slog.Info("Listening on :8080")
-	http.ListenAndServe(":8080", mux)
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		panic(err)
+	}
+	select {}
 }
 
 func setup() http.Handler {
@@ -34,8 +72,7 @@ func setup() http.Handler {
 	if port == "" {
 		port = "3306"
 	}
-	_, err := strconv.Atoi(port)
-	if err != nil {
+	if _, err := strconv.Atoi(port); err != nil {
 		panic(fmt.Sprintf("failed to convert DB port number from ISUCON_DB_PORT environment variable into int: %v", err))
 	}
 	user := os.Getenv("ISUCON_DB_USER")
@@ -58,58 +95,114 @@ func setup() http.Handler {
 	dbConfig.Net = "tcp"
 	dbConfig.DBName = dbname
 	dbConfig.ParseTime = true
+	dbConfig.InterpolateParams = true
+	dbConfig.Loc = time.UTC
 
-	_db, err := sqlx.Connect("mysql", dbConfig.FormatDSN())
-	if err != nil {
+	var err error
+	for i := 0; ; i++ {
+		db, err = sqlx.Connect("mysql", dbConfig.FormatDSN())
+		if err == nil {
+			break
+		}
+		if i > 60 {
+			panic(err)
+		}
+		slog.Error("failed to connect db, retrying", "err", err)
+		time.Sleep(time.Second)
+	}
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
+
+	mu.Lock()
+	if err := loadAll(); err != nil {
 		panic(err)
 	}
-	db = _db
+	mu.Unlock()
 
-	mux := chi.NewRouter()
-	mux.Use(middleware.Logger)
-	mux.Use(middleware.Recoverer)
+	go persistLoop()
+	go matchingLoop()
+
+	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/initialize", postInitialize)
 
-	// app handlers
-	{
-		mux.HandleFunc("POST /api/app/users", appPostUsers)
+	mux.HandleFunc("POST /api/app/users", appPostUsers)
+	mux.Handle("POST /api/app/payment-methods", appAuth(appPostPaymentMethods))
+	mux.Handle("GET /api/app/rides", appAuth(appGetRides))
+	mux.Handle("POST /api/app/rides", appAuth(appPostRides))
+	mux.Handle("POST /api/app/rides/estimated-fare", appAuth(appPostRidesEstimatedFare))
+	mux.Handle("POST /api/app/rides/{ride_id}/evaluation", appAuth(appPostRideEvaluatation))
+	mux.Handle("GET /api/app/notification", appAuth(appGetNotification))
+	mux.Handle("GET /api/app/nearby-chairs", appAuth(appGetNearbyChairs))
 
-		authedMux := mux.With(appAuthMiddleware)
-		authedMux.HandleFunc("POST /api/app/payment-methods", appPostPaymentMethods)
-		authedMux.HandleFunc("GET /api/app/rides", appGetRides)
-		authedMux.HandleFunc("POST /api/app/rides", appPostRides)
-		authedMux.HandleFunc("POST /api/app/rides/estimated-fare", appPostRidesEstimatedFare)
-		authedMux.HandleFunc("POST /api/app/rides/{ride_id}/evaluation", appPostRideEvaluatation)
-		authedMux.HandleFunc("GET /api/app/notification", appGetNotification)
-		authedMux.HandleFunc("GET /api/app/nearby-chairs", appGetNearbyChairs)
-	}
+	mux.HandleFunc("POST /api/owner/owners", ownerPostOwners)
+	mux.Handle("GET /api/owner/sales", ownerAuth(ownerGetSales))
+	mux.Handle("GET /api/owner/chairs", ownerAuth(ownerGetChairs))
 
-	// owner handlers
-	{
-		mux.HandleFunc("POST /api/owner/owners", ownerPostOwners)
+	mux.HandleFunc("POST /api/chair/chairs", chairPostChairs)
+	mux.Handle("POST /api/chair/activity", chairAuth(chairPostActivity))
+	mux.Handle("POST /api/chair/coordinate", chairAuth(chairPostCoordinate))
+	mux.Handle("GET /api/chair/notification", chairAuth(chairGetNotification))
+	mux.Handle("POST /api/chair/rides/{ride_id}/status", chairAuth(chairPostRideStatus))
 
-		authedMux := mux.With(ownerAuthMiddleware)
-		authedMux.HandleFunc("GET /api/owner/sales", ownerGetSales)
-		authedMux.HandleFunc("GET /api/owner/chairs", ownerGetChairs)
-	}
-
-	// chair handlers
-	{
-		mux.HandleFunc("POST /api/chair/chairs", chairPostChairs)
-
-		authedMux := mux.With(chairAuthMiddleware)
-		authedMux.HandleFunc("POST /api/chair/activity", chairPostActivity)
-		authedMux.HandleFunc("POST /api/chair/coordinate", chairPostCoordinate)
-		authedMux.HandleFunc("GET /api/chair/notification", chairGetNotification)
-		authedMux.HandleFunc("POST /api/chair/rides/{ride_id}/status", chairPostRideStatus)
-	}
-
-	// internal handlers
-	{
-		mux.HandleFunc("GET /api/internal/matching", internalGetMatching)
-	}
+	mux.HandleFunc("GET /api/internal/matching", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	return mux
+}
+
+func appAuth(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("app_session")
+		if err != nil || c.Value == "" {
+			writeError(w, http.StatusUnauthorized, errors.New("app_session cookie is required"))
+			return
+		}
+		mu.Lock()
+		user := usersByToken[c.Value]
+		mu.Unlock()
+		if user == nil {
+			writeError(w, http.StatusUnauthorized, errors.New("invalid access token"))
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxUser, user)))
+	})
+}
+
+func ownerAuth(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("owner_session")
+		if err != nil || c.Value == "" {
+			writeError(w, http.StatusUnauthorized, errors.New("owner_session cookie is required"))
+			return
+		}
+		mu.Lock()
+		owner := ownersByToken[c.Value]
+		mu.Unlock()
+		if owner == nil {
+			writeError(w, http.StatusUnauthorized, errors.New("invalid access token"))
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxOwner, owner)))
+	})
+}
+
+func chairAuth(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("chair_session")
+		if err != nil || c.Value == "" {
+			writeError(w, http.StatusUnauthorized, errors.New("chair_session cookie is required"))
+			return
+		}
+		mu.Lock()
+		chair := chairsByToken[c.Value]
+		mu.Unlock()
+		if chair == nil {
+			writeError(w, http.StatusUnauthorized, errors.New("invalid access token"))
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxChair, chair)))
+	})
 }
 
 type postInitializeRequest struct {
@@ -121,22 +214,30 @@ type postInitializeResponse struct {
 }
 
 func postInitialize(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	req := &postInitializeRequest{}
 	if err := bindJSON(r, req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	if out, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
+	mu.Lock()
+	defer mu.Unlock()
+	dropPersistQueue()
+	flushMu.Lock()
+	out, err := exec.Command("../sql/init.sh").CombinedOutput()
+	if err == nil {
+		_, err = db.Exec("UPDATE settings SET value = ? WHERE name = 'payment_gateway_url'", req.PaymentServer)
+	}
+	flushMu.Unlock()
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to initialize: %s: %w", string(out), err))
 		return
 	}
-
-	if _, err := db.ExecContext(ctx, "UPDATE settings SET value = ? WHERE name = 'payment_gateway_url'", req.PaymentServer); err != nil {
+	if err := loadAll(); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	paymentGatewayURL = req.PaymentServer
 
 	writeJSON(w, http.StatusOK, postInitializeResponse{Language: "go"})
 }
@@ -151,12 +252,12 @@ func bindJSON(r *http.Request, v interface{}) error {
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	buf, err := json.Marshal(v)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	w.WriteHeader(statusCode)
 	w.Write(buf)
 }
@@ -164,15 +265,8 @@ func writeJSON(w http.ResponseWriter, statusCode int, v interface{}) {
 func writeError(w http.ResponseWriter, statusCode int, err error) {
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	w.WriteHeader(statusCode)
-	buf, marshalError := json.Marshal(map[string]string{"message": err.Error()})
-	if marshalError != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"marshaling error failed"}`))
-		return
-	}
+	buf, _ := json.Marshal(map[string]string{"message": err.Error()})
 	w.Write(buf)
-
-	slog.Error("error response wrote", err)
 }
 
 func secureRandomStr(b int) string {
@@ -180,5 +274,9 @@ func secureRandomStr(b int) string {
 	if _, err := crand.Read(k); err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf("%x", k)
+	return hex.EncodeToString(k)
+}
+
+func newID() string {
+	return ulid.Make().String()
 }
