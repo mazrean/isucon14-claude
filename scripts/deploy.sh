@@ -13,6 +13,9 @@ cd "$(dirname "$0")/.."
 APP=${APP_HOST:-isucon14-2}
 DB=${DB_HOST:-isucon14-3}
 NGINX=${NGINX_HOST:-isucon14-1}
+# 追加の TLS 終端 nginx (NGINX ノードがカーネルの DNAT で新規接続を振り分ける)
+EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3}
+LB_TARGETS=${LB_TARGETS:-10.100.0.19}
 # address MySQL is reachable at from the app node
 DB_PRIVATE_IP=${DB_PRIVATE_IP:-10.100.0.19}
 # nginx upstream "server" value (host:port or unix:/path)
@@ -48,20 +51,26 @@ rs "$WORK/env.sh" "$APP:/home/isucon/env.sh" --chown=isucon:isucon --chmod=F755
 rs etc/systemd/system/ "$APP:/etc/systemd/system/" --chown=root:root --include='isuride-*.service' --exclude='*'
 rs etc/sysctl.d/99-isucon.conf "$APP:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
 
-if [ "$NGINX" != "$APP" ]; then
-  echo "==> [$NGINX] nginx, sysctl (upstream $APP_UPSTREAM)"
-  rs etc/sysctl.d/99-isucon.conf "$NGINX:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
-else
-  echo "==> [$NGINX] nginx (upstream $APP_UPSTREAM)"
-fi
-rs etc/nginx/nginx.conf "$NGINX:/etc/nginx/nginx.conf" --chown=root:root
-rs "$WORK/isuride.conf" "$NGINX:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
+for h in $NGINX $EXTRA_NGINX; do
+  echo "==> [$h] nginx, sysctl (upstream $APP_UPSTREAM)"
+  rs etc/sysctl.d/99-isucon.conf "$h:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
+  rs etc/nginx/nginx.conf "$h:/etc/nginx/nginx.conf" --chown=root:root
+  rs "$WORK/isuride.conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
+done
+echo "==> [$NGINX] TLS load balancing -> [$LB_TARGETS]"
+echo "LB_TARGETS=\"$LB_TARGETS\"" >"$WORK/tls-lb.env"
+remote "$NGINX" "sudo mkdir -p /etc/isucon"
+rs "$WORK/tls-lb.env" "$NGINX:/etc/isucon/tls-lb.env" --chown=root:root --chmod=F644
+rs etc/isucon/tls-lb.sh "$NGINX:/usr/local/bin/isucon-tls-lb.sh" --chown=root:root --chmod=F755
+rs etc/systemd/system/isucon-tls-lb.service "$NGINX:/etc/systemd/system/isucon-tls-lb.service" --chown=root:root --chmod=F644
+remote "$NGINX" "sudo systemctl daemon-reload && sudo systemctl enable -q isucon-tls-lb && sudo systemctl restart isucon-tls-lb && sudo iptables -t nat -S ISUCON_LB | tail -n +2"
 
 # every node: stop services it does not own
-for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" | sort -u); do
+for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
   ROLES=""
   [ "$h" = "$APP" ] && ROLES="$ROLES app"
   [ "$h" = "$NGINX" ] && ROLES="$ROLES nginx"
+  case " $EXTRA_NGINX " in *" $h "*) ROLES="$ROLES nginx";; esac
   [ "$h" = "$DB" ] && ROLES="$ROLES db"
   remote "$h" "ROLES='$ROLES' MATCHER=$MATCHER bash -s" <<'REMOTE'
 set -e
