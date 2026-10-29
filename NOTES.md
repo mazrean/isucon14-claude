@@ -1,6 +1,10 @@
 # ISUCON14 チューニング作業メモ
 
-## 環境 (isuenv, 2026-10-29 構築, TTL 10h)
+## 環境 (isuenv, 2026-10-29 構築, TTL 10h → 2026-10-30 08:33 UTC まで延長)
+
+- TTL 延長: 各ノードの `/var/lib/isuenv-expires-at` (UNIX 時刻) と EC2 タグ `isuenv:expires-at` を書き換える。
+- ベンチノードのメモリ制限 (mem=9G) はユーザー許可のもと解除済み (16GB, 8 vCPU のまま)。
+  `/etc/default/grub.d/zz-isuenv-mem.cfg` を `/root/zz-isuenv-mem.cfg.disabled` に退避して update-grub。
 
 | node | public | private | 役割 |
 | --- | --- | --- | --- |
