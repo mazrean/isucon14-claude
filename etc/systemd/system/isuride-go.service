@@ -10,7 +10,7 @@ EnvironmentFile=/home/isucon/env.sh
 Environment=PPROF=1
 Environment=STATS=1
 Environment=NEARBY_MAX_HOLD=4s
-Environment=NEARBY_PER_CHAIR=4
+Environment=NEARBY_PER_CHAIR=8
 # Environment=GOMAXPROCS=2
 
 User=isucon
