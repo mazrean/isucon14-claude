@@ -98,6 +98,9 @@ type Ride struct {
 	Statuses   []RideStatus
 	Discount   int
 	Evaluating bool
+
+	MatchedAt   time.Time // 分析用
+	EvalStartAt time.Time // 分析用
 }
 
 func (r *Ride) Status() string {

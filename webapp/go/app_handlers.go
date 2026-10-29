@@ -325,6 +325,7 @@ func appPostRideEvaluatation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ride.Evaluating = true
+	ride.EvalStartAt = time.Now()
 	fare := ride.Fare()
 	pgURL := paymentGatewayURL
 	mu.Unlock()
@@ -347,6 +348,7 @@ func appPostRideEvaluatation(w http.ResponseWriter, r *http.Request) {
 	c.Completed = append(c.Completed, ride)
 	c.Busy = false
 	addRideStatus(ride, "COMPLETED")
+	recordTimeline(ride)
 	kickMatching()
 
 	writeJSON(w, http.StatusOK, &appPostRideEvaluationResponse{CompletedAt: ride.UpdatedAt.UnixMilli()})

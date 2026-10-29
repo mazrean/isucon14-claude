@@ -109,6 +109,7 @@ func assign(r *Ride, c *Chair) {
 	r.Chair = c
 	r.ChairID = c.ID
 	r.UpdatedAt = now()
+	r.MatchedAt = r.UpdatedAt
 	c.Busy = true
 	c.LastRide = r
 	persistRide(r)

@@ -11,6 +11,27 @@ var (
 	cntNearby, cntNearbyEmpty, cntPostRides, cntSales, cntOwnerChairs, cntPostChairs atomic.Int64
 )
 
+// ライドの区間ごとの所要時間 (ms) の累積。mu で保護
+// 0:match待ち 1:match→ENROUTE 2:ENROUTE→PICKUP 3:PICKUP→CARRYING 4:CARRYING→ARRIVED 5:ARRIVED→評価受信 6:評価受信→完了(決済)
+var timelineSum [7]float64
+var timelineN int
+
+func recordTimeline(r *Ride) {
+	at := map[string]time.Time{}
+	for _, st := range r.Statuses {
+		at[st.Status] = st.CreatedAt
+	}
+	ms := func(a, b time.Time) float64 { return float64(b.Sub(a).Microseconds()) / 1000 }
+	d := [7]float64{
+		ms(r.CreatedAt, r.MatchedAt), ms(r.MatchedAt, at["ENROUTE"]), ms(at["ENROUTE"], at["PICKUP"]),
+		ms(at["PICKUP"], at["CARRYING"]), ms(at["CARRYING"], at["ARRIVED"]), ms(at["ARRIVED"], r.EvalStartAt), ms(r.EvalStartAt, at["COMPLETED"]),
+	}
+	for i := range d {
+		timelineSum[i] += d[i]
+	}
+	timelineN++
+}
+
 // STATS=1 で 1 秒ごとに需給の状況をログに出す (シナリオ分析用)
 func init() {
 	if os.Getenv("STATS") == "" {
@@ -37,10 +58,18 @@ func init() {
 				oldest = time.Since(waitingRides[0].CreatedAt)
 			}
 			nUsers := len(users)
+			var tl [7]int
+			if timelineN > 0 {
+				for i := range tl {
+					tl[i] = int(timelineSum[i] / float64(timelineN))
+				}
+			}
+			tlN := timelineN
+			timelineSum, timelineN = [7]float64{}, 0
 			mu.Unlock()
 			slog.Info("stats", "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers,
 				"nearby", cntNearby.Swap(0), "nearby_empty", cntNearbyEmpty.Swap(0), "post_rides", cntPostRides.Swap(0),
-				"sales", cntSales.Load(), "owner_chairs", cntOwnerChairs.Load(), "post_chairs", cntPostChairs.Load(), "owners", len(owners))
+				"sales", cntSales.Load(), "owner_chairs", cntOwnerChairs.Load(), "post_chairs", cntPostChairs.Load(), "owners", len(owners), "timeline_n", tlN, "timeline_ms", tl)
 		}
 	}()
 }
