@@ -85,6 +85,7 @@ func ownerGetSales(w http.ResponseWriter, r *http.Request) {
 	}
 	until = until.Add(999 * time.Microsecond)
 	owner := r.Context().Value(ctxOwner).(*Owner)
+	cntSales.Add(1)
 
 	mu.Lock()
 	res := ownerGetSalesResponse{}
@@ -131,6 +132,7 @@ type ownerGetChairResponseChair struct {
 
 func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
 	owner := r.Context().Value(ctxOwner).(*Owner)
+	cntOwnerChairs.Add(1)
 
 	mu.Lock()
 	res := ownerGetChairResponse{}

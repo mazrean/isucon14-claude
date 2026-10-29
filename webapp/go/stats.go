@@ -3,7 +3,12 @@ package main
 import (
 	"log/slog"
 	"os"
+	"sync/atomic"
 	"time"
+)
+
+var (
+	cntNearby, cntNearbyEmpty, cntPostRides, cntSales, cntOwnerChairs, cntPostChairs atomic.Int64
 )
 
 // STATS=1 で 1 秒ごとに需給の状況をログに出す (シナリオ分析用)
@@ -33,7 +38,9 @@ func init() {
 			}
 			nUsers := len(users)
 			mu.Unlock()
-			slog.Info("stats", "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers)
+			slog.Info("stats", "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers,
+				"nearby", cntNearby.Swap(0), "nearby_empty", cntNearbyEmpty.Swap(0), "post_rides", cntPostRides.Swap(0),
+				"sales", cntSales.Load(), "owner_chairs", cntOwnerChairs.Load(), "post_chairs", cntPostChairs.Load(), "owners", len(owners))
 		}
 	}()
 }

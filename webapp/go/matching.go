@@ -8,9 +8,9 @@ import (
 const (
 	matchingInterval = 20 * time.Millisecond
 	// これ未満の待ち時間のライドには、迎車距離 < 10*speed の椅子だけを割り当てる
-	strictWait = 2000 * time.Millisecond
+	strictWait = 3000 * time.Millisecond
 	// これ以上待ったライドは ETA に関わらず最優先で割り当てる (30s 未マッチは critical)
-	urgentWait = 2500 * time.Millisecond
+	urgentWait = 3500 * time.Millisecond
 )
 
 var matchingKick = make(chan struct{}, 1)

@@ -35,6 +35,7 @@ func chairPostChairs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cntPostChairs.Add(1)
 	t := now()
 	c := &Chair{ID: newID(), OwnerID: owner.ID, Name: req.Name, Model: req.Model, AccessToken: secureRandomStr(32), CreatedAt: t, UpdatedAt: t}
 	addChair(c)
