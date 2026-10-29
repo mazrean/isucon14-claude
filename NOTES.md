@@ -4,9 +4,9 @@
 
 | node | public | private | 役割 |
 | --- | --- | --- | --- |
-| isucon14-1 | 13.231.220.166 | 10.100.0.218 | nginx (ベンチ対象, TLS 終端) |
-| isucon14-2 | 54.95.92.62 | 10.100.0.176 | app (オンメモリ Go, :8080) |
-| isucon14-3 | 18.179.35.42 | 10.100.0.19 | MySQL (write-behind 永続化先) |
+| isucon14-1 | 13.231.220.166 | 10.100.0.218 | ベンチ対象。nginx + :443 新規接続を DNAT で 3 分割 (isucon-tls-lb.service) |
+| isucon14-2 | 54.95.92.62 | 10.100.0.176 | app (オンメモリ Go, UDS /run/isuride/app.sock + :8080) + nginx 1 worker (UDS) |
+| isucon14-3 | 18.179.35.42 | 10.100.0.19 | MySQL (write-behind 永続化先) + nginx |
 | isucon14-bench | 54.248.56.216 | 10.100.0.67 | ベンチマーカー |
 
 ```sh
@@ -29,6 +29,9 @@ make all                                          # deploy + bench (Makefile 参
 | (多数) | matching: 近い椅子を最大 3s 待つ / 空 nearby 遅延 300ms | 367995, 365092 |
 | 8f…/be8f9a8 | /images を no-store (ベンチのメモリ 7.5G→4.7G) + 空 nearby 遅延 1s→2s | 407726, 406620 → 431149, 441564 |
 | 79a0185 | 空 nearby をロングポーリング化し、空き椅子ごとに K 人だけ起こす | 642665, 641665 |
+| fd8a885 | TLS 終端を DNAT で 2 ノードに分散 + components バンドル no-store | 645607, 695793 |
+| 5b178da | 空き椅子 1 台あたり起こす人数 K=8 | 737836, 730988 |
+| 89d95c0 | 同居 nginx→app を UDS 化、TLS 3 分割 | 727118, 733128, (全台再起動後) 750315 |
 
 ## 知見
 
@@ -46,6 +49,8 @@ make all                                          # deploy + bench (Makefile 参
 - 決済: 失敗率 min(50%, 直近3s件数)%、トークンごと 4 回失敗後は必ず成功。並列リトライは
   初回リクエストとの競合で二重決済の経路があるので不採用。
 - HTTP/1.1 は h2 より悪い (255k, 271k)。gzip_static off は差なし。
+- 再起動試験 (89d95c0): 全 3 台同時 reboot → DNAT/nginx/app/MySQL 自動復帰、GET /api/app/rides の応答 md5 と行数一致。
+- UDS: app と同居する nginx のみ (別ホスト間は TCP)。同居ノードは CPU を取り合うので nginx は 1 worker。
 - 計測: STATS=1 で 1 秒ごとに需給・区間時間をログ (journalctl -u isuride-go | grep stats)。
 
 ## 方針
