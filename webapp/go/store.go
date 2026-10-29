@@ -164,6 +164,20 @@ func now() time.Time {
 	return t
 }
 
+// 完了時刻はミリ秒単位で一意にする。owner/sales の until (ms) に
+// 同一ミリ秒の別ライドが混ざってベンチの集計より大きくなるのを防ぐ。
+var lastCompletedMs int64
+
+func completionTime() time.Time {
+	t := now()
+	if ms := t.UnixMilli(); ms <= lastCompletedMs {
+		t = time.UnixMilli(lastCompletedMs + 1)
+		lastNow = t
+	}
+	lastCompletedMs = t.UnixMilli()
+	return t
+}
+
 func addUser(u *User) {
 	users[u.ID] = u
 	usersByToken[u.AccessToken] = u

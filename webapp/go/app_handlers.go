@@ -338,7 +338,7 @@ func appPostRideEvaluatation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ride.Evaluation = req.Evaluation
-	ride.UpdatedAt = now()
+	ride.UpdatedAt = completionTime()
 	persistRide(ride)
 	c := ride.Chair
 	c.CompletedCount++

@@ -9,6 +9,8 @@ const (
 	matchingInterval = 20 * time.Millisecond
 	// これ未満の待ち時間のライドには、迎車距離 < 10*speed の椅子だけを割り当てる
 	strictWait = 1200 * time.Millisecond
+	// これ以上待ったライドは ETA に関わらず最優先で割り当てる (30s 未マッチは critical)
+	urgentWait = 2500 * time.Millisecond
 )
 
 var matchingKick = make(chan struct{}, 1)
@@ -34,10 +36,11 @@ func matchingLoop() {
 }
 
 type matchPair struct {
-	ride  *Ride
-	chair *Chair
-	eta   int
-	dist  int
+	ride   *Ride
+	chair  *Chair
+	eta    int
+	dist   int
+	urgent bool
 }
 
 // mu を保持して呼ぶ
@@ -58,16 +61,21 @@ func runMatching() {
 	t := time.Now()
 	pairs := make([]matchPair, 0, len(free)*len(waitingRides))
 	for _, r := range waitingRides {
-		strict := t.Sub(r.CreatedAt) < strictWait
+		waited := t.Sub(r.CreatedAt)
+		strict := waited < strictWait
+		urgent := waited >= urgentWait
 		for _, c := range free {
 			d := calculateDistance(c.Latitude, c.Longitude, r.PickupLatitude, r.PickupLongitude)
 			if strict && d >= 10*c.Speed {
 				continue
 			}
-			pairs = append(pairs, matchPair{ride: r, chair: c, eta: (d + c.Speed - 1) / c.Speed, dist: d})
+			pairs = append(pairs, matchPair{ride: r, chair: c, eta: (d + c.Speed - 1) / c.Speed, dist: d, urgent: urgent})
 		}
 	}
 	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].urgent != pairs[j].urgent {
+			return pairs[i].urgent
+		}
 		if pairs[i].eta != pairs[j].eta {
 			return pairs[i].eta < pairs[j].eta
 		}
