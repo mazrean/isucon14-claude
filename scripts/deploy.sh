@@ -14,8 +14,10 @@ APP=${APP_HOST:-isucon14-2}
 DB=${DB_HOST:-isucon14-3}
 NGINX=${NGINX_HOST:-isucon14-1}
 # 追加の TLS 終端 nginx (NGINX ノードがカーネルの DNAT で新規接続を振り分ける)
-EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3}
-LB_TARGETS=${LB_TARGETS:-10.100.0.19}
+EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3 isucon14-2}
+LB_TARGETS=${LB_TARGETS:-10.100.0.19 10.100.0.176}
+# app と同居する nginx は unix domain socket で app に繋ぐ
+APP_SOCKET=${APP_SOCKET:-/run/isuride/app.sock}
 # address MySQL is reachable at from the app node
 DB_PRIVATE_IP=${DB_PRIVATE_IP:-10.100.0.19}
 # nginx upstream "server" value (host:port or unix:/path)
@@ -34,6 +36,7 @@ remote() { local h=$1; shift; ssh $SSH_OPTS "$h" "$@"; }
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 sed -E "s|^ISUCON_DB_HOST=.*|ISUCON_DB_HOST=\"$DB_PRIVATE_IP\"|" env.sh >"$WORK/env.sh"
 sed -E "s|^(\s*server )127\.0\.0\.1:8080;|\1$APP_UPSTREAM;|" etc/nginx/sites-available/isuride.conf >"$WORK/isuride.conf"
+sed -E "s|^(\s*server )127\.0\.0\.1:8080;|\1unix:$APP_SOCKET;|" etc/nginx/sites-available/isuride.conf >"$WORK/isuride-uds.conf"
 
 echo "==> [$DB] mysql config + sysctl"
 rs etc/mysql/mysql.conf.d/zz-isucon.cnf "$DB:/etc/mysql/mysql.conf.d/zz-isucon.cnf" --chown=root:root --chmod=F644 -i | tee "$WORK/dbsync" >/dev/null || true
@@ -54,8 +57,16 @@ rs etc/sysctl.d/99-isucon.conf "$APP:/etc/sysctl.d/99-isucon.conf" --chown=root:
 for h in $NGINX $EXTRA_NGINX; do
   echo "==> [$h] nginx, sysctl (upstream $APP_UPSTREAM)"
   rs etc/sysctl.d/99-isucon.conf "$h:/etc/sysctl.d/99-isucon.conf" --chown=root:root --chmod=F644
-  rs etc/nginx/nginx.conf "$h:/etc/nginx/nginx.conf" --chown=root:root
-  rs "$WORK/isuride.conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
+  if [ "$h" = "$APP" ]; then
+    # app と同居する nginx は 1 ワーカーに絞り、app に CPU を残す
+    sed -E "s|^worker_processes .*;|worker_processes 1;|" etc/nginx/nginx.conf >"$WORK/nginx-app.conf"
+    rs "$WORK/nginx-app.conf" "$h:/etc/nginx/nginx.conf" --chown=root:root --chmod=F644
+  else
+    rs etc/nginx/nginx.conf "$h:/etc/nginx/nginx.conf" --chown=root:root
+  fi
+  conf="$WORK/isuride.conf"
+  [ "$h" = "$APP" ] && conf="$WORK/isuride-uds.conf"
+  rs "$conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
 done
 echo "==> [$NGINX] TLS load balancing -> [$LB_TARGETS]"
 echo "LB_TARGETS=\"$LB_TARGETS\"" >"$WORK/tls-lb.env"

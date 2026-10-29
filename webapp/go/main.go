@@ -44,6 +44,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// 同一ホストの nginx からは unix domain socket で受ける (別ホストの nginx 用に TCP も残す)
+	if sock := os.Getenv("ISUCON_SOCKET"); sock != "" {
+		os.Remove(sock)
+		uln, err := net.Listen("unix", sock)
+		if err != nil {
+			panic(err)
+		}
+		if err := os.Chmod(sock, 0o666); err != nil {
+			panic(err)
+		}
+		go func() {
+			if err := srv.Serve(uln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				panic(err)
+			}
+		}()
+	}
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
