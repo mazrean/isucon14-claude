@@ -8,6 +8,7 @@ StartLimitIntervalSec=0
 WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env.sh
 Environment=PPROF=1
+Environment=STATS=1
 # Environment=GOMAXPROCS=2
 
 User=isucon

@@ -277,6 +277,15 @@ func secureRandomStr(b int) string {
 	return hex.EncodeToString(k)
 }
 
+func envDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
+
 func newID() string {
 	return ulid.Make().String()
 }

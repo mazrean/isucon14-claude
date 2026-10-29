@@ -432,10 +432,17 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 	}
 	mu.Unlock()
 
+	if len(nearby) == 0 && nearbyEmptyDelay > 0 {
+		// 空き椅子が無いとユーザーは即座に再試行を繰り返す。応答を遅らせて空回りを抑え、
+		// ベンチの CPU を椅子の移動 (= スコア) に回させる
+		time.Sleep(nearbyEmptyDelay)
+	}
 	writeJSON(w, http.StatusOK, &appGetNearbyChairsResponse{Chairs: nearby, RetrievedAt: time.Now().UnixMilli()})
 }
 
 const nearbyCompletedGrace = 1500 * time.Millisecond
+
+var nearbyEmptyDelay = envDuration("NEARBY_EMPTY_DELAY", 100*time.Millisecond)
 
 func calculateFare(pickupLatitude, pickupLongitude, destLatitude, destLongitude int) int {
 	meteredFare := farePerDistance * calculateDistance(pickupLatitude, pickupLongitude, destLatitude, destLongitude)
