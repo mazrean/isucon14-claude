@@ -9,7 +9,7 @@ WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env.sh
 Environment=PPROF=1
 Environment=STATS=1
-Environment=NEARBY_EMPTY_DELAY=1s
+Environment=NEARBY_EMPTY_DELAY=2s
 # Environment=GOMAXPROCS=2
 
 User=isucon
