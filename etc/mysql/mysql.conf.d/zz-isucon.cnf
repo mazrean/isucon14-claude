@@ -1,0 +1,21 @@
+# ISUCON tuning (deployed to the DB node isucon14-2 only). Named zz- so it is read after mysqld.cnf.
+[mysqld]
+bind-address = 0.0.0.0
+mysqlx = 0
+
+# no binlog: single node, no replication
+disable_log_bin
+
+max_connections = 1000
+
+innodb_buffer_pool_size = 2G
+innodb_redo_log_capacity = 1G
+innodb_flush_method = O_DIRECT
+# flush redo once per second; data survives a clean shutdown/reboot
+innodb_flush_log_at_trx_commit = 2
+innodb_doublewrite = 0
+
+# slow query log (enable when profiling)
+# slow_query_log = 1
+# slow_query_log_file = /var/log/mysql/mysql-slow.log
+# long_query_time = 0
