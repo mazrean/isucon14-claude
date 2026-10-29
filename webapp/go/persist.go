@@ -141,17 +141,23 @@ func writeRows(t *tableDef, rows []persistOp) {
 			args = append(args, rows[i].vals...)
 		}
 		sb.WriteString(t.sqlSuf)
-		for attempt := 0; ; attempt++ {
-			_, err := db.Exec(sb.String(), args...)
-			if err == nil {
-				break
+		if _, err := db.Exec(sb.String(), args...); err != nil {
+			slog.Error("persist batch failed, falling back to per-row", "table", t.name, "err", err)
+			for i := start; i < end; i++ {
+				writeRow(t, ph, rows[i])
 			}
-			slog.Error("persist failed", "table", t.name, "err", err)
-			if attempt >= 5 {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
 		}
+	}
+}
+
+func writeRow(t *tableDef, ph string, row persistOp) {
+	for attempt := 0; attempt < 5; attempt++ {
+		_, err := db.Exec(t.sqlPre+ph+t.sqlSuf, row.vals...)
+		if err == nil {
+			return
+		}
+		slog.Error("persist row failed", "table", t.name, "key", row.key, "err", err)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

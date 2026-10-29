@@ -39,11 +39,6 @@ func appPostUsers(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if _, ok := usernames[req.Username]; ok {
-		writeError(w, http.StatusInternalServerError, errors.New("duplicate username"))
-		return
-	}
-
 	var inviter *User
 	inv := ""
 	if req.InvitationCode != nil && *req.InvitationCode != "" {

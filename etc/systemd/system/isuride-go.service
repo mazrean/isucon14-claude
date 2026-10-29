@@ -7,7 +7,7 @@ StartLimitIntervalSec=0
 [Service]
 WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env.sh
-# Environment=GOGC=200
+Environment=PPROF=1
 # Environment=GOMAXPROCS=2
 
 User=isucon
