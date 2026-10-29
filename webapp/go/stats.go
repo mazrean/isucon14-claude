@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	cntNearby, cntNearbyEmpty, cntPostRides, cntSales, cntOwnerChairs, cntPostChairs atomic.Int64
+	cntLocations, cntNearby, cntNearbyEmpty, cntPostRides, cntSales, cntOwnerChairs, cntPostChairs atomic.Int64
 )
 
 // ライドの区間ごとの所要時間 (ms) の累積。mu で保護
@@ -65,9 +65,17 @@ func init() {
 				}
 			}
 			tlN := timelineN
+			nRides := len(rides)
+			nStatuses := 0
+			for _, r := range rides {
+				nStatuses += len(r.Statuses)
+			}
 			timelineSum, timelineN = [7]float64{}, 0
 			mu.Unlock()
-			slog.Info("stats", "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers, "nearby_waiters", len(nearbyWaiters),
+			persistMu.Lock()
+			pq := len(persistQueue)
+			persistMu.Unlock()
+			slog.Info("stats", "persist_queue", pq, "rides", nRides, "statuses", nStatuses, "locations", cntLocations.Load(), "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers, "nearby_waiters", len(nearbyWaiters),
 				"nearby", cntNearby.Swap(0), "nearby_empty", cntNearbyEmpty.Swap(0), "post_rides", cntPostRides.Swap(0),
 				"sales", cntSales.Load(), "owner_chairs", cntOwnerChairs.Load(), "post_chairs", cntPostChairs.Load(), "owners", len(owners), "timeline_n", tlN, "timeline_ms", tl)
 		}
