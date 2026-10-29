@@ -32,6 +32,14 @@ make all                                          # deploy + bench (Makefile 参
 | fd8a885 | TLS 終端を DNAT で 2 ノードに分散 + components バンドル no-store | 645607, 695793 |
 | 5b178da | 空き椅子 1 台あたり起こす人数 K=8 | 737836, 730988 |
 | 89d95c0 | 同居 nginx→app を UDS 化、TLS 3 分割 | 727118, 733128, (全台再起動後) 750315 |
+| 7f6bf32 | index.html/favicon を 1d キャッシュ | 774165, 741778 |
+| 31f8a60 | 空 nearby の保留 8s | 865140, 870314 |
+| 8bf650e | 空き椅子 1 台あたり K=32 人起こす | 938704, 947899 (※帯域バースト込み) |
+| (最終) | no-store の静的ファイルも gzip (node1 送信帯域上限対策) | 788742, 803900, 789131, 757578 |
+
+※ 90 万台は c5.large の帯域バーストクレジットに乗っていた。連続走行でクレジットが尽きると
+  node1 の ENA bw_out_allowance_exceeded が増え (500 万パケット破棄)、再送・タイムアウトで崩れる。
+  最終構成は ~3.6GB/走行 (~400Mbps 平均) でベースライン内、破棄 0。
 
 ## 知見
 
@@ -51,6 +59,13 @@ make all                                          # deploy + bench (Makefile 参
 - HTTP/1.1 は h2 より悪い (255k, 271k)。gzip_static off は差なし。
 - 再起動試験 (89d95c0): 全 3 台同時 reboot → DNAT/nginx/app/MySQL 自動復帰、GET /api/app/rides の応答 md5 と行数一致。
 - UDS: app と同居する nginx のみ (別ホスト間は TCP)。同居ノードは CPU を取り合うので nginx は 1 worker。
+- ベンチのプロファイル: 配布バイナリは strip 済み。同ソース + 埋め込みハッシュ (配布バイナリから抽出) で
+  分析用コピーを作り取得 (採点には使わない)。静的取得+md5 31%、履歴確認 14%、決済サーバ 7%、GC ~20%。
+- 不採用 (測定済み): 得点レート型マッチング (732k/775k)、迎車条件内レート優先 (911k/910k)、
+  決済並列リトライ (差なし)、nearby 保留 9.3s / 猶予 250ms / http2_chunk_size (差なし)、
+  GET /rides 保留 (評価↑→ユーザー増→悪化 844k)、/assets を 304 方式 (887k/866k)、全静的 no-store (614k)。
+- 攻めの選択肢: components バンドルもキャッシュ可にすると ~915k だがベンチメモリ 7.0G/7.9G。
+  town.svg までキャッシュすると 7.8G でベンチが固まった。固まると 0 点なので不採用。
 - 計測: STATS=1 で 1 秒ごとに需給・区間時間をログ (journalctl -u isuride-go | grep stats)。
 
 ## 方針
