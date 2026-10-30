@@ -48,7 +48,7 @@ make all                                          # deploy + bench (Makefile 参
 | (app) | マッチング・nearby 配布のロック短縮、空き椅子集合、GOGC=400 | 1625423, 1665539 |
 | (c7a.4xlarge) | ベンチを c7a.4xlarge に | 1670344, 1758711 |
 | (persist) | 座標を履歴でなく椅子ごとの集計で保存 (MySQL 負荷減) | 1783113, 1788217 |
-| (rust) | webapp/rust: Go 版を Rust (tokio + hyper 1, 単一 parking_lot Mutex) に移植。app CPU idle 7-11% → 43-45% | 1874229, 1910410 (同条件 Go 1864705) |
+| (rust) | webapp/rust: Go 版を Rust (tokio + hyper 1, 単一 parking_lot Mutex) に移植。同一ロック内 A/B で app CPU idle Go 4-10% → Rust 39-43% (スコアはベンチ律速で同等) | Rust 1919691, 1905784 / Go 1869299, 1925843 |
 
 ※ 90 万台は c5.large の帯域バーストクレジットに乗っていた。連続走行でクレジットが尽きると
   node1 の ENA bw_out_allowance_exceeded が増え (500 万パケット破棄)、再送・タイムアウトで崩れる。
