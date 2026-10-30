@@ -205,7 +205,7 @@ fn assign(st: &mut State, ri: u32, ci: u32) {
     st.update_free(ci);
     persist_ride(&st.rides[ri as usize]);
     let ev = st.chair_event(ri, St::Matching);
-    st.chairs[ci as usize].notifier.push(ev);
+    st.chairs[ci as usize].notifier.push(ev, false);
 }
 
 // ---------------------------------------------------------------- nearby

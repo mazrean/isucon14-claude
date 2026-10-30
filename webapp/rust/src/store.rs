@@ -54,6 +54,10 @@ pub struct NotifInner {
     pub generation: u64,
     /// 現在の通知ストリーム (SSE のレスポンスボディ)。繋がっている間は push が直接書き込む
     tx: Option<tokio::sync::mpsc::UnboundedSender<Bytes>>,
+    /// 最後に送るべきイベント (ユーザーの COMPLETED) を書いたら接続を閉じる。
+    /// ベンチは COMPLETED を受け取るとユーザーの通知ストリームを切るので、こちらから先にレスポンスを
+    /// 完結させておくと nginx が upstream の keepalive 接続を捨てずに済む
+    ended: bool,
 }
 
 /// SSE の 1 イベント分 ("data: <json>\n\n")
@@ -70,16 +74,21 @@ pub struct Notifier {
 
 impl Notifier {
     pub fn new() -> Arc<Notifier> {
-        Arc::new(Notifier { inner: Mutex::new(NotifInner { queue: Vec::new(), last: None, generation: 0, tx: None }) })
+        Arc::new(Notifier { inner: Mutex::new(NotifInner { queue: Vec::new(), last: None, generation: 0, tx: None, ended: false }) })
     }
-    /// 通知ストリームが繋がっていればそこへ直接書き (中継タスクを起こさない)、無ければ次の接続まで溜める
-    pub fn push(&self, ev: Bytes) {
+    /// 通知ストリームが繋がっていればそこへ直接書き (中継タスクを起こさない)、無ければ次の接続まで溜める。
+    /// last なら書いた後に接続を閉じる (以後の接続も溜まっている分を送ったら閉じる)
+    pub fn push(&self, ev: Bytes, last: bool) {
         let mut i = self.inner.lock();
+        i.ended = last;
         if let Some(tx) = &i.tx {
             let mut b = Vec::with_capacity(ev.len() + 8);
             sse_frame(&mut b, &ev);
             if tx.send(Bytes::from(b)).is_ok() {
                 i.last = Some(ev);
+                if last {
+                    i.tx = None;
+                }
                 return;
             }
             i.tx = None;
@@ -100,7 +109,9 @@ impl Notifier {
             }
             let _ = tx.send(Bytes::from(b));
         }
-        i.tx = Some(tx);
+        if !i.ended {
+            i.tx = Some(tx);
+        }
         rx
     }
     /// 既存の接続を全て閉じる (新しいライドの作成時に呼ぶ)。
@@ -470,11 +481,11 @@ impl State {
         let r = &self.rides[ri as usize];
         if let Some(ui) = r.user {
             let ev = self.app_event(ri, status);
-            self.users[ui as usize].notifier.push(ev);
+            self.users[ui as usize].notifier.push(ev, status == St::Completed);
         }
         if let Some(ci) = r.chair {
             let ev = self.chair_event(ri, status);
-            self.chairs[ci as usize].notifier.push(ev);
+            self.chairs[ci as usize].notifier.push(ev, false);
         }
     }
 
