@@ -70,6 +70,14 @@ for h in $NGINX $EXTRA_NGINX; do
   [ "$h" = "$APP" ] && conf="$WORK/isuride-uds.conf"
   rs "$conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
 done
+# AWS-LC 版 nginx (scripts/build-nginx-awslc.sh でビルド済みなら配る。切り替えは再起動時)
+for h in $NGINX $EXTRA_NGINX; do
+  if [ -x build/nginx-awslc ]; then
+    rs build/nginx-awslc "$h:/usr/local/sbin/nginx-awslc" --chown=root:root --chmod=F755
+    remote "$h" "sudo mkdir -p /etc/systemd/system/nginx.service.d"
+    rs etc/systemd/system/nginx.service.d/awslc.conf "$h:/etc/systemd/system/nginx.service.d/awslc.conf" --chown=root:root --chmod=F644
+  fi
+done
 echo "==> [$NGINX] TLS load balancing -> [$LB_TARGETS]"
 printf 'LB_TARGETS="%s"\nLB_SELF_WEIGHT=%s\n' "$LB_TARGETS" "$LB_SELF_WEIGHT" >"$WORK/tls-lb.env"
 remote "$NGINX" "sudo mkdir -p /etc/isucon"
@@ -77,6 +85,13 @@ rs "$WORK/tls-lb.env" "$NGINX:/etc/isucon/tls-lb.env" --chown=root:root --chmod=
 rs etc/isucon/tls-lb.sh "$NGINX:/usr/local/bin/isucon-tls-lb.sh" --chown=root:root --chmod=F755
 rs etc/systemd/system/isucon-tls-lb.service "$NGINX:/etc/systemd/system/isucon-tls-lb.service" --chown=root:root --chmod=F644
 remote "$NGINX" "sudo systemctl daemon-reload && sudo systemctl enable -q isucon-tls-lb && sudo systemctl restart isucon-tls-lb && sudo iptables -t nat -S ISUCON_LB | tail -n +2"
+
+for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
+  echo "==> [$h] NIC IRQ affinity / XPS / qdisc"
+  rs etc/isucon/net-tune.sh "$h:/usr/local/bin/isucon-net-tune.sh" --chown=root:root --chmod=F755
+  rs etc/systemd/system/isucon-net-tune.service "$h:/etc/systemd/system/isucon-net-tune.service" --chown=root:root --chmod=F644
+  remote "$h" "sudo systemctl daemon-reload && sudo systemctl disable -q irqbalance 2>/dev/null; sudo systemctl enable -q isucon-net-tune && sudo systemctl restart isucon-net-tune"
+done
 
 # every node: stop services it does not own
 for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
