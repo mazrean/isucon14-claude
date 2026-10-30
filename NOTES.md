@@ -5,7 +5,9 @@
 - TTL 延長: 各ノードの `/var/lib/isuenv-expires-at` (UNIX 時刻) と EC2 タグ `isuenv:expires-at` を書き換える。
 - ベンチノードのメモリ制限 (mem=9G) はユーザー許可のもと解除済み (16GB, 8 vCPU のまま)。
   `/etc/default/grub.d/zz-isuenv-mem.cfg` を `/root/zz-isuenv-mem.cfg.disabled` に退避して update-grub。
-- ベンチノードの CPU もユーザー許可のもと c5.2xlarge → c5.4xlarge → c7a.4xlarge (16 物理コア) に変更。
+- ベンチノードの CPU もユーザー許可のもと c5.2xlarge → c5.4xlarge → c7a.4xlarge → (クォータ 64 に引き上げ後)
+  c7a.12xlarge → c8a.8xlarge (32 物理コア EPYC 9R45 4.5GHz, 64GB) に変更。c8a.8xlarge で CPU 57% idle、
+  スコアは c7a.12xlarge と同等以上 (2465658, 2422608)。c8a.4xlarge だと飽和する見込み。
   vCPU クォータが 32 (競技 3 台で 6 使用) なので 26 vCPU 超は不可。停止/起動でパブリック IP が変わるので
   ~/.ssh/isuenv_config の HostName を書き換える (private IP 10.100.0.67 は不変)。
 
@@ -54,6 +56,8 @@ make all                                          # deploy + bench (Makefile 参
 | 16aa7be | NIC 割り込み CPU 固定 / XPS / pfifo_fast (irqbalance 停止) | 1882467, 1923446 |
 | e559c2e | Rust 版を既定に、app ノードにも TLS (nginx-awslc, UDS, 1 worker, 重み 0.3) | 2019231, 2037817, 2022814 |
 | 1e937d3 | nginx ワーカー CPU 固定 + reuseport + SO_INCOMING_CPU パッチ | 2076181, 2027306 |
+| (bench c7a.12xlarge) | ベンチ 48 vCPU。以降はサーバー 3 台が飽和 | 2179458, 2196855, 2412306 |
+| (bench c8a.8xlarge) | ベンチを c8a.8xlarge に (コスパ) | 2465658, 2422608 |
 
 ※ 90 万台は c5.large の帯域バーストクレジットに乗っていた。連続走行でクレジットが尽きると
   node1 の ENA bw_out_allowance_exceeded が増え (500 万パケット破棄)、再送・タイムアウトで崩れる。
@@ -75,6 +79,7 @@ make all                                          # deploy + bench (Makefile 参
 - 決済: 失敗率 min(50%, 直近3s件数)%、トークンごと 4 回失敗後は必ず成功。並列リトライは
   初回リクエストとの競合で二重決済の経路があるので不採用。
 - HTTP/1.1 は h2 より悪い (255k, 271k)。gzip_static off は差なし。
+- 再起動試験 (1e937d3 + Rust + WAL): 全 3 台同時 reboot → owner chairs/sales・app rides の md5 一致、全サービス復帰。
 - 再起動試験 (89d95c0): 全 3 台同時 reboot → DNAT/nginx/app/MySQL 自動復帰、GET /api/app/rides の応答 md5 と行数一致。
 - UDS: app と同居する nginx のみ (別ホスト間は TCP)。同居ノードは CPU を取り合うので nginx は 1 worker。
 - ベンチのプロファイル: 配布バイナリは strip 済み。同ソース + 埋め込みハッシュ (配布バイナリから抽出) で
