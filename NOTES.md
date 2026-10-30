@@ -48,6 +48,7 @@ make all                                          # deploy + bench (Makefile 参
 | (app) | マッチング・nearby 配布のロック短縮、空き椅子集合、GOGC=400 | 1625423, 1665539 |
 | (c7a.4xlarge) | ベンチを c7a.4xlarge に | 1670344, 1758711 |
 | (persist) | 座標を履歴でなく椅子ごとの集計で保存 (MySQL 負荷減) | 1783113, 1788217 |
+| (rust) | webapp/rust: Go 版を Rust (tokio + hyper 1, 単一 parking_lot Mutex) に移植。app CPU idle 7-11% → 43-45% | 1874229, 1910410 (同条件 Go 1864705) |
 
 ※ 90 万台は c5.large の帯域バーストクレジットに乗っていた。連続走行でクレジットが尽きると
   node1 の ENA bw_out_allowance_exceeded が増え (500 万パケット破棄)、再送・タイムアウトで崩れる。
@@ -79,6 +80,15 @@ make all                                          # deploy + bench (Makefile 参
 - 攻めの選択肢: components バンドルもキャッシュ可にすると ~915k だがベンチメモリ 7.0G/7.9G。
   town.svg までキャッシュすると 7.8G でベンチが固まった。固まると 0 点なので不採用。
 - 計測: STATS=1 で 1 秒ごとに需給・区間時間をログ (journalctl -u isuride-go | grep stats)。
+
+## Rust 版 (webapp/rust)
+
+- `make deploy-rust` でビルド + デプロイ (既存の isuride-go.service の ExecStart のバイナリを置き換えるだけ)。Go に戻すのは `make deploy`。
+- toolchain は rust-toolchain.toml の nightly (検証時 rustc 1.101.0-nightly 92ffebece 2026-10-28)、target-cpu=skylake-avx512、
+  glibc 要求は 2.39 まで (Ubuntu 24.04 と同じ)。release は lto=fat / codegen-units=1 / panic=abort。
+- WAL 形式は Go とバイト互換 (cargo test go_compat に Go 側出力を GO_WAL=... で渡して比較)。Go が書いた WAL を Rust が、その逆も replay できる。
+- 外部動作は Go と同じ (GET 系の応答・エラー応答を同じ DB 状態で突き合わせて差分なし。ヘッダ名の大小文字と順序のみ異なる)。
+  /api/initialize の language だけ "rust"。PPROF は Go のみ。RUST_WORKERS で tokio のワーカー数 (既定 = CPU 数)。
 
 ## 方針
 

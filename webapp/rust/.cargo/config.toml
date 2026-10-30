@@ -1,0 +1,6 @@
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+# 本番 (isucon14-2: c5.large, Xeon Platinum 8275CL = Cascade Lake)。ビルドホストの native は使わない
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=skylake-avx512"]
