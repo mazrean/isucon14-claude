@@ -70,6 +70,9 @@ func main() {
 		defer cancel()
 		srv.Shutdown(ctx)
 		flushPersist()
+		flushMu.Lock()
+		walClose()
+		flushMu.Unlock()
 		os.Exit(0)
 	}()
 	slog.Info("Listening on :8080")
@@ -128,6 +131,16 @@ func setup() http.Handler {
 	}
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(8)
+
+	// 前回の WAL を MySQL に反映してから読み込む
+	if err := replayWAL(); err != nil {
+		slog.Error("failed to replay wal", "err", err)
+	}
+	if walMode {
+		if err := openWAL(); err != nil {
+			panic(err)
+		}
+	}
 
 	mu.Lock()
 	if err := loadAll(); err != nil {
@@ -243,6 +256,10 @@ func postInitialize(w http.ResponseWriter, r *http.Request) {
 	out, err := exec.Command("../sql/init.sh").CombinedOutput()
 	if err == nil {
 		_, err = db.Exec("UPDATE settings SET value = ? WHERE name = 'payment_gateway_url'", req.PaymentServer)
+	}
+	if err == nil {
+		// データを初期化したので WAL も捨てる
+		err = walTruncate()
 	}
 	flushMu.Unlock()
 	if err != nil {

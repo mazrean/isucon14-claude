@@ -10,6 +10,9 @@ EnvironmentFile=/home/isucon/env.sh
 Environment=PPROF=1
 Environment=GOGC=400
 Environment=PERSIST_INTERVAL=1s
+# 実行中の書き込みはローカルの WAL のみ。起動時に WAL を MySQL へ流し込んでからロードする
+Environment=PERSIST_MODE=wal
+Environment=WAL_PATH=/home/isucon/isuride.wal
 Environment=ISUCON_SOCKET=/run/isuride/app.sock
 RuntimeDirectory=isuride
 RuntimeDirectoryMode=0755

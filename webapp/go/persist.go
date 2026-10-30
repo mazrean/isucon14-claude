@@ -97,37 +97,60 @@ func flushPersist() {
 	if len(ops) == 0 {
 		return
 	}
+	if walMode {
+		walAppend(dedupOps(ops))
+		return
+	}
+	writeOps(ops)
+}
 
+// dedupOps は ops を tableOrder 順に並べ、upsert テーブルは同一キーの最後のスナップショットだけ残す。
+func dedupOps(ops []persistOp) []persistOp {
 	byTable := map[*tableDef][]persistOp{}
 	for _, op := range ops {
 		byTable[op.t] = append(byTable[op.t], op)
 	}
+	out := make([]persistOp, 0, len(ops))
 	for _, t := range tableOrder {
 		rows := byTable[t]
-		if len(rows) == 0 {
-			continue
-		}
-		if t.upsert {
-			// 同一キーは最後のスナップショットだけ残す
+		if t.upsert && len(rows) > 1 {
 			last := make(map[string]int, len(rows))
 			for i, op := range rows {
 				last[op.key] = i
 			}
-			dedup := rows[:0:0]
 			for i, op := range rows {
 				if last[op.key] == i {
-					dedup = append(dedup, op)
+					out = append(out, op)
 				}
 			}
-			rows = dedup
+			continue
 		}
-		writeRows(t, rows)
+		out = append(out, rows...)
 	}
+	return out
 }
 
-func writeRows(t *tableDef, rows []persistOp) {
+// writeOps は dedupOps した結果をテーブルごとにまとめて MySQL に書く。
+func writeOps(ops []persistOp) error {
+	ops = dedupOps(ops)
+	var firstErr error
+	for start := 0; start < len(ops); {
+		end := start + 1
+		for end < len(ops) && ops[end].t == ops[start].t {
+			end++
+		}
+		if err := writeRows(ops[start].t, ops[start:end]); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		start = end
+	}
+	return firstErr
+}
+
+func writeRows(t *tableDef, rows []persistOp) error {
 	const chunk = 500
 	ph := "(" + strings.TrimSuffix(strings.Repeat("?,", len(t.cols)), ",") + ")"
+	var firstErr error
 	for start := 0; start < len(rows); start += chunk {
 		end := min(start+chunk, len(rows))
 		var sb strings.Builder
@@ -144,21 +167,25 @@ func writeRows(t *tableDef, rows []persistOp) {
 		if _, err := db.Exec(sb.String(), args...); err != nil {
 			slog.Error("persist batch failed, falling back to per-row", "table", t.name, "err", err)
 			for i := start; i < end; i++ {
-				writeRow(t, ph, rows[i])
+				if err := writeRow(t, ph, rows[i]); err != nil && firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 	}
+	return firstErr
 }
 
-func writeRow(t *tableDef, ph string, row persistOp) {
+func writeRow(t *tableDef, ph string, row persistOp) error {
+	var err error
 	for attempt := 0; attempt < 5; attempt++ {
-		_, err := db.Exec(t.sqlPre+ph+t.sqlSuf, row.vals...)
-		if err == nil {
-			return
+		if _, err = db.Exec(t.sqlPre+ph+t.sqlSuf, row.vals...); err == nil {
+			return nil
 		}
 		slog.Error("persist row failed", "table", t.name, "key", row.key, "err", err)
 		time.Sleep(50 * time.Millisecond)
 	}
+	return err
 }
 
 func nullStr(s string) any {
