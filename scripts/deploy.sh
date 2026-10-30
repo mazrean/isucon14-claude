@@ -70,6 +70,14 @@ for h in $NGINX $EXTRA_NGINX; do
   [ "$h" = "$APP" ] && conf="$WORK/isuride-uds.conf"
   rs "$conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
 done
+# AWS-LC 版 nginx (scripts/build-nginx-awslc.sh でビルド済みなら配る。切り替えは再起動時)
+for h in $NGINX $EXTRA_NGINX; do
+  if [ -x build/nginx-awslc ]; then
+    rs build/nginx-awslc "$h:/usr/local/sbin/nginx-awslc" --chown=root:root --chmod=F755
+    remote "$h" "sudo mkdir -p /etc/systemd/system/nginx.service.d"
+    rs etc/systemd/system/nginx.service.d/awslc.conf "$h:/etc/systemd/system/nginx.service.d/awslc.conf" --chown=root:root --chmod=F644
+  fi
+done
 echo "==> [$NGINX] TLS load balancing -> [$LB_TARGETS]"
 printf 'LB_TARGETS="%s"\nLB_SELF_WEIGHT=%s\n' "$LB_TARGETS" "$LB_SELF_WEIGHT" >"$WORK/tls-lb.env"
 remote "$NGINX" "sudo mkdir -p /etc/isucon"
