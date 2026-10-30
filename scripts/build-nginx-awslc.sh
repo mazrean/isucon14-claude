@@ -11,6 +11,9 @@ cd "$W"
 [ -d pcre2-10.44 ] || curl -sSL https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz | tar xz
 [ -d zlib-1.3.1 ] || curl -sSL https://zlib.net/fossils/zlib-1.3.1.tar.gz | tar xz
 [ -d aws-lc ] || git clone -q --depth 1 --branch v1.62.0 https://github.com/aws/aws-lc.git
+# ソケット BIO の余計な getsockopt(SO_ERROR) を外し、短い read() をフラグで nginx に伝える
+python3 "$R/scripts/awslc-sock-no-soerror.patch.py" "$PWD/aws-lc"
+python3 "$R/scripts/awslc-sock-short-read-flag.patch.py" "$PWD/aws-lc"
 cmake -S aws-lc -B aws-lc/build -GNinja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DDISABLE_GO=ON \
   -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ >/dev/null
 ninja -C aws-lc/build ssl crypto >/dev/null
@@ -19,6 +22,8 @@ cd nginx-1.28.0
 # AWS-LC には SSL_SESSION_get0_hostname が無い (BoringSSL と同じ扱いにする)
 sed -i 's/     \&\& !defined LIBRESSL_VERSION_NUMBER \&\& !defined OPENSSL_IS_BORINGSSL)/     \&\& !defined LIBRESSL_VERSION_NUMBER \&\& !defined OPENSSL_IS_BORINGSSL \&\& !defined OPENSSL_IS_AWSLC)/' src/http/ngx_http_request.c
 python3 "$R/scripts/nginx-incoming-cpu.patch.py" "$PWD"
+python3 "$R/scripts/nginx-upstream-cached-no-soerror.patch.py" "$PWD"
+python3 "$R/scripts/nginx-ssl-recv-short-read.patch.py" "$PWD"
 CC=/usr/bin/gcc ./configure --prefix=/usr/share/nginx --sbin-path=/usr/local/sbin/nginx-awslc --conf-path=/etc/nginx/nginx.conf \
   --error-log-path=/var/log/nginx/error.log --http-log-path=/var/log/nginx/access.log --pid-path=/run/nginx.pid --lock-path=/var/lock/nginx.lock \
   --modules-path=/usr/lib/nginx/modules --http-client-body-temp-path=/var/lib/nginx/body --http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
