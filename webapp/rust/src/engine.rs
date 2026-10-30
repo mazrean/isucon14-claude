@@ -7,9 +7,11 @@ use std::time::{Duration, Instant};
 
 const MATCHING_INTERVAL: Duration = Duration::from_millis(20);
 /// これ未満の待ち時間のライドには、迎車距離 < 10*speed の椅子だけを割り当てる
-const STRICT_WAIT_US: i64 = 3_000_000;
+static STRICT_WAIT_US: LazyLock<i64> =
+    LazyLock::new(|| env_duration("MATCH_STRICT_WAIT", Duration::from_millis(3000)).as_micros() as i64);
 /// これ以上待ったライドは ETA に関わらず最優先で割り当てる
-const URGENT_WAIT_US: i64 = 3_500_000;
+static URGENT_WAIT_US: LazyLock<i64> =
+    LazyLock::new(|| env_duration("MATCH_URGENT_WAIT", Duration::from_millis(3500)).as_micros() as i64);
 
 pub struct NearbyCfg {
     pub completed_grace_us: i64,
@@ -139,8 +141,8 @@ fn run_matching(st: &mut State) {
                 plat: r.pickup_latitude,
                 plon: r.pickup_longitude,
                 created_at: r.created_at,
-                strict: waited < STRICT_WAIT_US,
-                urgent: waited >= URGENT_WAIT_US,
+                strict: waited < *STRICT_WAIT_US,
+                urgent: waited >= *URGENT_WAIT_US,
                 taken: false,
             }
         })
