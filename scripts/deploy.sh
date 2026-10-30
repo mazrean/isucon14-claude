@@ -14,9 +14,10 @@ APP=${APP_HOST:-isucon14-2}
 DB=${DB_HOST:-isucon14-3}
 NGINX=${NGINX_HOST:-isucon14-1}
 # 追加の TLS 終端 nginx (NGINX ノードがカーネルの DNAT で新規接続を振り分ける)
-EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3}
-# "ip:重み"。本ノード (NGINX) の重みは LB_SELF_WEIGHT (app ノードに TLS を持たせると app が遅れて悪化: 1.64M/1.61M)
-LB_TARGETS=${LB_TARGETS:-10.100.0.19:1}
+EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3 isucon14-2}
+# "ip:重み"。本ノード (NGINX) の重みは LB_SELF_WEIGHT。app ノード (Rust 版) は 0.3 が最良
+# (0.3: 2.02M/2.04M, 0.5: 1.99M/1.98M, 0.8: 1.96M/1.84M。Go 版のときは TLS を持たせると悪化した)
+LB_TARGETS=${LB_TARGETS:-10.100.0.19:1 10.100.0.176:0.3}
 LB_SELF_WEIGHT=${LB_SELF_WEIGHT:-0.75}
 # app と同居する nginx は unix domain socket で app に繋ぐ
 APP_SOCKET=${APP_SOCKET:-/run/isuride/app.sock}
@@ -24,7 +25,7 @@ APP_SOCKET=${APP_SOCKET:-/run/isuride/app.sock}
 DB_PRIVATE_IP=${DB_PRIVATE_IP:-10.100.0.19}
 # nginx upstream "server" value (host:port or unix:/path)
 APP_UPSTREAM=${APP_UPSTREAM:-10.100.0.176:8080}
-BIN=${BIN:-webapp/go/isuride}
+BIN=${BIN:-webapp/rust/target/x86_64-unknown-linux-gnu/release/isuride}
 # MATCHER=1 keeps the curl-based isuride-matcher running (only needed by the original app)
 MATCHER=${MATCHER:-0}
 SSH_OPTS="-o BatchMode=yes"
