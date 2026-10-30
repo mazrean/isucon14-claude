@@ -15,7 +15,9 @@ DB=${DB_HOST:-isucon14-3}
 NGINX=${NGINX_HOST:-isucon14-1}
 # 追加の TLS 終端 nginx (NGINX ノードがカーネルの DNAT で新規接続を振り分ける)
 EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3}
-LB_TARGETS=${LB_TARGETS:-10.100.0.19}
+# "ip:重み"。本ノード (NGINX) の重みは LB_SELF_WEIGHT (app ノードに TLS を持たせると app が遅れて悪化: 1.64M/1.61M)
+LB_TARGETS=${LB_TARGETS:-10.100.0.19:1}
+LB_SELF_WEIGHT=${LB_SELF_WEIGHT:-1}
 # app と同居する nginx は unix domain socket で app に繋ぐ
 APP_SOCKET=${APP_SOCKET:-/run/isuride/app.sock}
 # address MySQL is reachable at from the app node
@@ -69,7 +71,7 @@ for h in $NGINX $EXTRA_NGINX; do
   rs "$conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
 done
 echo "==> [$NGINX] TLS load balancing -> [$LB_TARGETS]"
-echo "LB_TARGETS=\"$LB_TARGETS\"" >"$WORK/tls-lb.env"
+printf 'LB_TARGETS="%s"\nLB_SELF_WEIGHT=%s\n' "$LB_TARGETS" "$LB_SELF_WEIGHT" >"$WORK/tls-lb.env"
 remote "$NGINX" "sudo mkdir -p /etc/isucon"
 rs "$WORK/tls-lb.env" "$NGINX:/etc/isucon/tls-lb.env" --chown=root:root --chmod=F644
 rs etc/isucon/tls-lb.sh "$NGINX:/usr/local/bin/isucon-tls-lb.sh" --chown=root:root --chmod=F755

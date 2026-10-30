@@ -9,11 +9,35 @@ iptables -t nat -N ISUCON_LB 2>/dev/null || iptables -t nat -F ISUCON_LB
 iptables -t nat -C PREROUTING -p tcp --dport 443 -j ISUCON_LB 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport 443 -j ISUCON_LB
 iptables -t nat -N ISUCON_LB_POST 2>/dev/null || iptables -t nat -F ISUCON_LB_POST
 iptables -t nat -C POSTROUTING -j ISUCON_LB_POST 2>/dev/null || iptables -t nat -A POSTROUTING -j ISUCON_LB_POST
-n=$(( $(echo $LB_TARGETS | wc -w) + 1 ))
-i=0
+# LB_TARGETS の各要素は "ip" (均等) か "ip:重み"。本ノード自身の重みは LB_SELF_WEIGHT (既定 1)。
+# 重み付きは statistic random で、残りの接続に対する条件付き確率を順に設定する。
+SELF_W=${LB_SELF_WEIGHT:-1}
+total=$SELF_W
+for t in $LB_TARGETS; do w=${t#*:}; [ "$w" = "$t" ] && w=1; total=$(python3 -c "print($total+$w)"); done
+rest=$total
 for t in $LB_TARGETS; do
-  # 残りの接続のうち 1/(n-i) を t に送る (nth は先頭から順に評価されるので均等になる)
-  iptables -t nat -A ISUCON_LB -p tcp --dport 443 -m conntrack --ctstate NEW -m statistic --mode nth --every $((n - i)) --packet 0 -j DNAT --to-destination "$t:443"
-  iptables -t nat -A ISUCON_LB_POST -p tcp -d "$t" --dport 443 -j MASQUERADE
-  i=$((i + 1))
+  ip=${t%%:*}; w=${t#*:}; [ "$w" = "$t" ] && w=1
+  p=$(python3 -c "print(f'{$w/$rest:.6f}')")
+  iptables -t nat -A ISUCON_LB -p tcp --dport 443 -m conntrack --ctstate NEW -m statistic --mode random --probability "$p" -j DNAT --to-destination "$ip:443"
+  iptables -t nat -A ISUCON_LB_POST -p tcp -d "$ip" --dport 443 -j MASQUERADE
+  rest=$(python3 -c "print($rest-$w)")
 done
+
+# 確立済みの転送フローを nftables の flowtable (ソフトウェア fast path) に載せ、
+# 転送パケットごとの netfilter 処理 (softirq) を減らす。NAT も flowtable 内で適用される。
+IF=$(ip -o route get 10.100.0.1 | grep -o "dev [^ ]*" | cut -d" " -f2)
+nft delete table inet isucon_ft 2>/dev/null || true
+if [ -n "$LB_TARGETS" ]; then
+  nft -f - <<NFT
+table inet isucon_ft {
+  flowtable ft {
+    hook ingress priority 0
+    devices = { $IF }
+  }
+  chain forward {
+    type filter hook forward priority 0; policy accept;
+    meta l4proto tcp flow add @ft
+  }
+}
+NFT
+fi
