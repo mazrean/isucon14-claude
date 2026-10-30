@@ -48,6 +48,18 @@ CREATE TABLE chair_locations
 )
   COMMENT = '椅子の現在位置情報テーブル';
 
+-- 椅子ごとの最新位置・総移動距離 (アプリはこちらに upsert する。chair_locations は初期データのみ)
+DROP TABLE IF EXISTS chair_states;
+CREATE TABLE chair_states
+(
+  chair_id       VARCHAR(26) NOT NULL,
+  latitude       INTEGER     NOT NULL,
+  longitude      INTEGER     NOT NULL,
+  total_distance INTEGER     NOT NULL,
+  location_at    DATETIME(6) NOT NULL,
+  PRIMARY KEY (chair_id)
+);
+
 DROP TABLE IF EXISTS users;
 CREATE TABLE users
 (

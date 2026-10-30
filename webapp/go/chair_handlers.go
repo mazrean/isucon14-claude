@@ -95,7 +95,7 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 	chair.Latitude, chair.Longitude = req.Latitude, req.Longitude
 	chair.LocationAt = t
 	chair.TotalDistanceUpdatedAt = t
-	persistChairLocation(chair, newID(), t)
+	persistChairLocation(chair, t)
 	cntLocations.Add(1)
 
 	if ride := chair.LastRide; ride != nil {

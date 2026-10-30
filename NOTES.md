@@ -5,6 +5,9 @@
 - TTL 延長: 各ノードの `/var/lib/isuenv-expires-at` (UNIX 時刻) と EC2 タグ `isuenv:expires-at` を書き換える。
 - ベンチノードのメモリ制限 (mem=9G) はユーザー許可のもと解除済み (16GB, 8 vCPU のまま)。
   `/etc/default/grub.d/zz-isuenv-mem.cfg` を `/root/zz-isuenv-mem.cfg.disabled` に退避して update-grub。
+- ベンチノードの CPU もユーザー許可のもと c5.2xlarge → c5.4xlarge → c7a.4xlarge (16 物理コア) に変更。
+  vCPU クォータが 32 (競技 3 台で 6 使用) なので 26 vCPU 超は不可。停止/起動でパブリック IP が変わるので
+  ~/.ssh/isuenv_config の HostName を書き換える (private IP 10.100.0.67 は不変)。
 
 | node | public | private | 役割 |
 | --- | --- | --- | --- |
@@ -39,7 +42,12 @@ make all                                          # deploy + bench (Makefile 参
 | 7f6bf32 | index.html/favicon を 1d キャッシュ | 774165, 741778 |
 | 31f8a60 | 空 nearby の保留 8s | 865140, 870314 |
 | 8bf650e | 空き椅子 1 台あたり K=32 人起こす | 938704, 947899 (※帯域バースト込み) |
-| (最終) | no-store の静的ファイルも gzip (node1 送信帯域上限対策) | 788742, 803900, 789131, 757578 |
+| bb4d596 | no-store の静的ファイルも gzip (node1 送信帯域上限対策) | 788742, 803900, 789131, 757578 |
+| 5e0139c | ベンチのメモリ制限解除 → 静的ファイルを全てキャッシュ可 | 1042661, 1046277 |
+| (c5.4xlarge) | ベンチ 16 vCPU / nginx を app ノードから外し TLS 2 分割 | 1551290, 1555024 |
+| (app) | マッチング・nearby 配布のロック短縮、空き椅子集合、GOGC=400 | 1625423, 1665539 |
+| (c7a.4xlarge) | ベンチを c7a.4xlarge に | 1670344, 1758711 |
+| (persist) | 座標を履歴でなく椅子ごとの集計で保存 (MySQL 負荷減) | 1783113, 1788217 |
 
 ※ 90 万台は c5.large の帯域バーストクレジットに乗っていた。連続走行でクレジットが尽きると
   node1 の ENA bw_out_allowance_exceeded が増え (500 万パケット破棄)、再送・タイムアウトで崩れる。

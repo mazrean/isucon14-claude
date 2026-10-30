@@ -38,10 +38,10 @@ var (
 	tCoupons       = newTable("coupons", 2, true, "user_id", "code", "discount", "created_at", "used_by")
 	tPaymentTokens = newTable("payment_tokens", 1, true, "user_id", "token", "created_at")
 	tRideStatuses  = newTable("ride_statuses", 1, false, "id", "ride_id", "status", "created_at", "app_sent_at", "chair_sent_at")
-	tChairLocs     = newTable("chair_locations", 1, false, "id", "chair_id", "latitude", "longitude", "created_at")
+	tChairStates   = newTable("chair_states", 1, true, "chair_id", "latitude", "longitude", "total_distance", "location_at")
 	tSettings      = newTable("settings", 1, true, "name", "value")
 
-	tableOrder = []*tableDef{tSettings, tUsers, tOwners, tChairs, tRides, tCoupons, tPaymentTokens, tRideStatuses, tChairLocs}
+	tableOrder = []*tableDef{tSettings, tUsers, tOwners, tChairs, tRides, tCoupons, tPaymentTokens, tRideStatuses, tChairStates}
 )
 
 type persistOp struct {
@@ -200,8 +200,10 @@ func persistRideStatus(r *Ride, st RideStatus) {
 	enqueue(tRideStatuses, st.ID, st.ID, r.ID, st.Status, st.CreatedAt, st.CreatedAt, st.CreatedAt)
 }
 
-func persistChairLocation(c *Chair, id string, t time.Time) {
-	enqueue(tChairLocs, id, id, c.ID, c.Latitude, c.Longitude, t)
+// 座標は履歴ではなく椅子ごとの集計 (最新位置・総移動距離・更新時刻) として保存する。
+// API が返すのはこの 3 つだけなので、再起動後に取得できるデータは変わらない。
+func persistChairLocation(c *Chair, t time.Time) {
+	enqueue(tChairStates, c.ID, c.ID, c.Latitude, c.Longitude, c.TotalDistance, t)
 }
 
 func persistSetting(name, value string) {

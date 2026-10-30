@@ -308,6 +308,28 @@ func loadAll() error {
 		c.TotalDistanceUpdatedAt = l.CreatedAt
 	}
 
+	var states []struct {
+		ChairID       string    `db:"chair_id"`
+		Latitude      int       `db:"latitude"`
+		Longitude     int       `db:"longitude"`
+		TotalDistance int       `db:"total_distance"`
+		LocationAt    time.Time `db:"location_at"`
+	}
+	if err := db.Select(&states, "SELECT chair_id, latitude, longitude, total_distance, location_at FROM chair_states"); err != nil {
+		return err
+	}
+	for _, st := range states {
+		c := chairs[st.ChairID]
+		if c == nil {
+			continue
+		}
+		c.HasLocation = true
+		c.Latitude, c.Longitude = st.Latitude, st.Longitude
+		c.TotalDistance = st.TotalDistance
+		c.LocationAt = st.LocationAt
+		c.TotalDistanceUpdatedAt = st.LocationAt
+	}
+
 	var dbUsers []struct {
 		ID             string    `db:"id"`
 		Username       string    `db:"username"`
