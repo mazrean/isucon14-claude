@@ -86,6 +86,13 @@ rs etc/isucon/tls-lb.sh "$NGINX:/usr/local/bin/isucon-tls-lb.sh" --chown=root:ro
 rs etc/systemd/system/isucon-tls-lb.service "$NGINX:/etc/systemd/system/isucon-tls-lb.service" --chown=root:root --chmod=F644
 remote "$NGINX" "sudo systemctl daemon-reload && sudo systemctl enable -q isucon-tls-lb && sudo systemctl restart isucon-tls-lb && sudo iptables -t nat -S ISUCON_LB | tail -n +2"
 
+for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
+  echo "==> [$h] NIC IRQ affinity / XPS / qdisc"
+  rs etc/isucon/net-tune.sh "$h:/usr/local/bin/isucon-net-tune.sh" --chown=root:root --chmod=F755
+  rs etc/systemd/system/isucon-net-tune.service "$h:/etc/systemd/system/isucon-net-tune.service" --chown=root:root --chmod=F644
+  remote "$h" "sudo systemctl daemon-reload && sudo systemctl disable -q irqbalance 2>/dev/null; sudo systemctl enable -q isucon-net-tune && sudo systemctl restart isucon-net-tune"
+done
+
 # every node: stop services it does not own
 for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
   ROLES=""
