@@ -1,7 +1,6 @@
 package main
 
 import (
-	"sort"
 	"time"
 )
 
@@ -30,8 +29,13 @@ func matchingLoop() {
 		case <-matchingKick:
 		}
 		mu.Lock()
+		t0 := time.Now()
 		runMatching()
+		t1 := time.Now()
 		dispatchNearby()
+		t2 := time.Now()
+		lockStat[0].add(t1.Sub(t0))
+		lockStat[1].add(t2.Sub(t1))
 		mu.Unlock()
 	}
 }
@@ -59,37 +63,77 @@ func runMatching() {
 		return
 	}
 
+	// 全ペアをソートする代わりに、椅子ごとの最良ライドを持って貪欲に確定する
+	// (結果は (urgent 優先, ETA 昇順, 古い順) で全ペアをソートした貪欲法と同じ)。
+	// 空き椅子は少なく待ちライドは多いので、ロック保持時間が大幅に短くなる。
 	t := time.Now()
-	pairs := make([]matchPair, 0, len(free)*len(waitingRides))
-	for _, r := range waitingRides {
+	type rideInfo struct {
+		r              *Ride
+		strict, urgent bool
+		taken          bool
+	}
+	infos := make([]rideInfo, len(waitingRides))
+	for i, r := range waitingRides {
 		waited := t.Sub(r.CreatedAt)
-		strict := waited < strictWait
-		urgent := waited >= urgentWait
-		for _, c := range free {
-			d := calculateDistance(c.Latitude, c.Longitude, r.PickupLatitude, r.PickupLongitude)
-			if strict && d >= 10*c.Speed {
+		infos[i] = rideInfo{r: r, strict: waited < strictWait, urgent: waited >= urgentWait}
+	}
+	better := func(a, b matchPair) bool {
+		if a.urgent != b.urgent {
+			return a.urgent
+		}
+		if a.eta != b.eta {
+			return a.eta < b.eta
+		}
+		return a.ride.CreatedAt.Before(b.ride.CreatedAt)
+	}
+	type cand struct {
+		best matchPair
+		idx  int // infos の index、-1 は候補なし
+	}
+	findBest := func(c *Chair) cand {
+		res := cand{idx: -1}
+		for i := range infos {
+			in := &infos[i]
+			if in.taken {
 				continue
 			}
-			pairs = append(pairs, matchPair{ride: r, chair: c, eta: (d + c.Speed - 1) / c.Speed, dist: d, urgent: urgent})
+			r := in.r
+			d := calculateDistance(c.Latitude, c.Longitude, r.PickupLatitude, r.PickupLongitude)
+			if in.strict && d >= 10*c.Speed {
+				continue
+			}
+			p := matchPair{ride: r, chair: c, eta: (d + c.Speed - 1) / c.Speed, dist: d, urgent: in.urgent}
+			if res.idx < 0 || better(p, res.best) {
+				res = cand{best: p, idx: i}
+			}
 		}
+		return res
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i].urgent != pairs[j].urgent {
-			return pairs[i].urgent
-		}
-		if pairs[i].eta != pairs[j].eta {
-			return pairs[i].eta < pairs[j].eta
-		}
-		return pairs[i].ride.CreatedAt.Before(pairs[j].ride.CreatedAt)
-	})
-
+	cands := make([]cand, len(free))
+	for i, c := range free {
+		cands[i] = findBest(c)
+	}
 	matched := false
-	for _, p := range pairs {
-		if p.ride.Chair != nil || p.chair.Busy {
-			continue
+	for {
+		bi := -1
+		for i := range cands {
+			if cands[i].idx >= 0 && (bi < 0 || better(cands[i].best, cands[bi].best)) {
+				bi = i
+			}
 		}
-		assign(p.ride, p.chair)
+		if bi < 0 {
+			break
+		}
+		taken := cands[bi].idx
+		assign(cands[bi].best.ride, cands[bi].best.chair)
+		infos[taken].taken = true
+		cands[bi].idx = -1
 		matched = true
+		for i := range cands {
+			if cands[i].idx == taken {
+				cands[i] = findBest(free[i])
+			}
+		}
 	}
 	if !matched {
 		return

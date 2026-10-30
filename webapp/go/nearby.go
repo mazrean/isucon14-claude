@@ -60,6 +60,20 @@ func collectNearby(lat, lon, distance int) []appGetNearbyChairsResponseChair {
 	return nearby
 }
 
+// visible (nearbyVisible な椅子) のうち範囲内のものを返す。mu を保持して呼ぶ
+func nearbyFrom(visible []*Chair, lat, lon, distance int) []appGetNearbyChairsResponseChair {
+	nearby := []appGetNearbyChairsResponseChair{}
+	for _, c := range visible {
+		if calculateDistance(lat, lon, c.Latitude, c.Longitude) <= distance {
+			nearby = append(nearby, appGetNearbyChairsResponseChair{
+				ID: c.ID, Name: c.Name, Model: c.Model,
+				CurrentCoordinate: Coordinate{Latitude: c.Latitude, Longitude: c.Longitude},
+			})
+		}
+	}
+	return nearby
+}
+
 func (wt *nearbyWaiter) wait(r *http.Request) []appGetNearbyChairsResponseChair {
 	timer := time.NewTimer(nearbyMaxHold)
 	defer timer.Stop()
@@ -86,15 +100,22 @@ func dispatchNearby() {
 	}
 	recent := time.Now().Add(-nearbyCompletedGrace)
 	now := time.Now()
+	visible := make([]*Chair, 0, 32)
 	slots := make([]*Chair, 0, 32)
 	for _, c := range chairList {
 		if c.NearbyGranted > 0 && now.Sub(c.NearbyGrantAt) > nearbyGrantTTL {
 			// 起こしたユーザーのライドが別の椅子に割り当てられた場合など
 			c.NearbyGranted = 0
 		}
-		if nearbyVisible(c, recent) && c.NearbyGranted < nearbyPerChair {
-			slots = append(slots, c)
+		if nearbyVisible(c, recent) {
+			visible = append(visible, c)
+			if c.NearbyGranted < nearbyPerChair {
+				slots = append(slots, c)
+			}
 		}
+	}
+	if len(slots) == 0 {
+		return
 	}
 	// 待ちライドが溢れると 30s 未マッチで失格になるので上限を設ける
 	allowed := nearbyMaxWaiting - len(waitingRides)
@@ -123,7 +144,7 @@ func dispatchNearby() {
 		best.NearbyGrantAt = now
 		allowed--
 		wt.done = true
-		wt.ch <- collectNearby(wt.lat, wt.lon, wt.dist)
+		wt.ch <- nearbyFrom(visible, wt.lat, wt.lon, wt.dist)
 	}
 	for i := len(rest); i < len(nearbyWaiters); i++ {
 		nearbyWaiters[i] = nil

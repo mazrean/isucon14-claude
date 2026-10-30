@@ -11,6 +11,22 @@ var (
 	cntLocations, cntNearby, cntNearbyEmpty, cntPostRides, cntSales, cntOwnerChairs, cntPostChairs atomic.Int64
 )
 
+// ロック保持時間の計測 (mu で保護): 0:matching 1:dispatchNearby 2:stats
+type lockTimer struct {
+	max, sum time.Duration
+	n        int
+}
+
+func (l *lockTimer) add(d time.Duration) {
+	l.sum += d
+	l.n++
+	if d > l.max {
+		l.max = d
+	}
+}
+
+var lockStat [3]lockTimer
+
 // ライドの区間ごとの所要時間 (ms) の累積。mu で保護
 // 0:match待ち 1:match→ENROUTE 2:ENROUTE→PICKUP 3:PICKUP→CARRYING 4:CARRYING→ARRIVED 5:ARRIVED→評価受信 6:評価受信→完了(決済)
 var timelineSum [7]float64
@@ -40,6 +56,7 @@ func init() {
 	go func() {
 		for range time.Tick(time.Second) {
 			mu.Lock()
+			ts := time.Now()
 			free, busy, inactive, speedSum := 0, 0, 0, 0
 			for _, c := range chairList {
 				switch {
@@ -71,11 +88,14 @@ func init() {
 				nStatuses += len(r.Statuses)
 			}
 			timelineSum, timelineN = [7]float64{}, 0
+			lockStat[2].add(time.Since(ts))
+			ls := lockStat
+			lockStat = [3]lockTimer{}
 			mu.Unlock()
 			persistMu.Lock()
 			pq := len(persistQueue)
 			persistMu.Unlock()
-			slog.Info("stats", "persist_queue", pq, "rides", nRides, "statuses", nStatuses, "locations", cntLocations.Load(), "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers, "nearby_waiters", len(nearbyWaiters),
+			slog.Info("stats", "lock_match_max_ms", ls[0].max.Milliseconds(), "lock_match_sum_ms", ls[0].sum.Milliseconds(), "lock_dispatch_max_ms", ls[1].max.Milliseconds(), "lock_dispatch_sum_ms", ls[1].sum.Milliseconds(), "lock_stats_ms", ls[2].max.Milliseconds(), "persist_queue", pq, "rides", nRides, "statuses", nStatuses, "locations", cntLocations.Load(), "waiting", waiting, "oldest_ms", oldest.Milliseconds(), "free", free, "busy", busy, "inactive", inactive, "busy_speed", speedSum, "users", nUsers, "nearby_waiters", len(nearbyWaiters),
 				"nearby", cntNearby.Swap(0), "nearby_empty", cntNearbyEmpty.Swap(0), "post_rides", cntPostRides.Swap(0),
 				"sales", cntSales.Load(), "owner_chairs", cntOwnerChairs.Load(), "post_chairs", cntPostChairs.Load(), "owners", len(owners), "timeline_n", tlN, "timeline_ms", tl)
 		}
