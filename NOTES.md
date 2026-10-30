@@ -98,6 +98,30 @@ make all                                          # deploy + bench (Makefile 参
 - 不採用: Go の TLS を app ノードで直接受ける (1585654, 1585492)、Go 版で app ノードに TLS (1.64M/1.61M)。
 - 計測: STATS=1 で 1 秒ごとに需給・区間時間をログ (journalctl -u isuride-go | grep stats)。
 
+## カーネル (6.17.0-1019-aws, c5.large 2 vCPU, ENA 2 キュー)
+
+計測: 同一ロック内で baseline/変更を交互に (scratchpad/kab.sh)。mpstat は走行中 25s 平均。
+- プロファイル (node1, perf cpu-clock): softirq 35%、netfilter 計 ~6% (conntrack ~3% は本ノード終端分、flowtable ~2%)。
+  flowtable は効いている (IpForwDatagrams は 24k/41s のみ。転送はほぼ nf_flow_offload_ip_hook 経由で 10.6% children)。
+  __dev_xmit_skb の self 3.3% は qdisc_run_end() の smp_mb() = LLQ (WC MMIO) 書き込み後の flush 待ち。
+  doorbells ≒ tx_cnt (xmit_more によるバッチ無し) なので qdisc を変えても消えない。
+- node1 は EC2 の pps 上限に当たっている (ethtool -S pps_allowance_exceeded が 1 走行 500-2600 増)。
+- napi_defer_hard_irqs=2 + gro_flush_timeout=50us (全台, baseline バイナリ規則より前に計測・同一ロック内ペア): IRQ 37k/s→0.1k/s で node1 idle +1.5pt だが
+  2627201/2585685 → 2507972/2444607 (-5%)。遅延増が効く。不採用。
+  (napi_complete_done() は defer 中 false を返し ena_io_poll() は unmask しない = IRQ は止まる。DIM も止まる)
+- node1 の nginx→node2:8080 を raw NOTRACK: 2567637/2681381 → 2524908/2567459。差なし、不採用。
+- node1 GRO off: 2587199 → 2572565。差なし (TSO 不可だが転送 ACK は GRO で纏まらない)。
+- XDP L4 LB (etc/isucon/xdp-lb.c, 送信元ポートのハッシュ 64 バケットでステートレス DNAT+SNAT, XDP_TX):
+  ENA の XDP は 2*キュー数 <= max_num_io_queues (=2) と MTU <= 3498 が必要 (ena_xdp.h ena_xdp_allowed())
+  → combined 1 + RPS + MTU 3498 (node2/3 は 10.100.0.218 向け route mtu/advmss) が前提。
+  ena_xdp_xmit_frame() は XDP_TX でも 1 フレームごとに doorbell (XDP_XMIT_FLUSH)。
+  同重み: 2599883 → 2541745 (node1 idle 10.6→19.8%, soft 37→34%)。node1 に重みを寄せる (self 27/64):
+  2719265/2588229 → 2286061/2265644 (CODE=24 多発)。1 キュー化のコストで相殺。不採用。
+- preempt=none: CONFIG_PREEMPT_DYNAMIC 未設定 (kernel/sched/core.c の setup_preempt_mode は #ifdef 内) なので無効。
+- cpuidle-haltpoll は linux-modules-extra に入っていて未導入。2 vCPU は同一コアの HT なのでポーリングは相方を遅くする見込み。
+- mpstat: node2 idle 4-7% / node3 idle 15-22% / node1 10-15%。TLS の重みを node3 に寄せる余地あり (deploy.sh LB_TARGETS)。
+- node2 の TcpPassiveOpens 30k/41s: nginx→app :8080 の接続を張り直している (upstream keepalive の見直し余地)。
+
 ## Rust 版 (webapp/rust)
 
 - `make deploy-rust` でビルド + デプロイ (既存の isuride-go.service の ExecStart のバイナリを置き換えるだけ)。Go に戻すのは `make deploy`。
