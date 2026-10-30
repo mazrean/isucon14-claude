@@ -9,6 +9,7 @@ WorkingDirectory=/home/isucon/webapp/go
 EnvironmentFile=/home/isucon/env.sh
 Environment=PPROF=1
 Environment=GOGC=400
+Environment=PERSIST_INTERVAL=1s
 Environment=ISUCON_SOCKET=/run/isuride/app.sock
 RuntimeDirectory=isuride
 RuntimeDirectoryMode=0755

@@ -62,7 +62,7 @@ func enqueue(t *tableDef, key string, vals ...any) {
 	persistQueue = append(persistQueue, persistOp{t: t, key: key, vals: vals})
 	n := len(persistQueue)
 	persistMu.Unlock()
-	if n >= 2000 {
+	if n >= 20000 {
 		select {
 		case persistKick <- struct{}{}:
 		default:
@@ -77,7 +77,7 @@ func dropPersistQueue() {
 }
 
 func persistLoop() {
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(envDuration("PERSIST_INTERVAL", 200*time.Millisecond))
 	for {
 		select {
 		case <-ticker.C:
