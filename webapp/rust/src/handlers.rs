@@ -14,7 +14,6 @@ use serde::de::DeserializeOwned;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
 
 /// json.NewDecoder(r.Body).Decode(v) 相当: 先頭の 1 値だけ読む。null は何もしない
 fn decode<T: DeserializeOwned + Default>(b: &[u8]) -> Result<T, String> {
@@ -527,46 +526,7 @@ async fn app_post_ride_evaluation(h: &HeaderMap, ride_id: String, body: Bytes) -
 }
 
 fn serve_sse(n: Arc<Notifier>) -> Resp {
-    let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(16);
-    tokio::spawn(async move {
-        let generation = {
-            let mut i = n.inner.lock();
-            i.generation += 1;
-            i.generation
-        };
-        // 古い接続を起こして終了させる
-        n.notify.notify_one();
-        let mut shut = SHUTDOWN.subscribe();
-        let mut first = true;
-        let mut buf: Vec<u8> = Vec::with_capacity(1024);
-        loop {
-            buf.clear();
-            {
-                let mut i = n.inner.lock();
-                if i.generation != generation {
-                    drop(i);
-                    n.notify.notify_one();
-                    return;
-                }
-                for ev in i.take(first) {
-                    buf.extend_from_slice(b"data: ");
-                    buf.extend_from_slice(&ev);
-                    buf.extend_from_slice(b"\n\n");
-                }
-            }
-            first = false;
-            if !buf.is_empty() && tx.send(Bytes::copy_from_slice(&buf)).await.is_err() {
-                return;
-            }
-            tokio::select! {
-                _ = tx.closed() => return,
-                _ = shut.wait_for(|v| *v) => return,
-                _ = n.notify.notified() => {}
-                _ = tokio::time::sleep(Duration::from_secs(30)) => {}
-            }
-        }
-    });
-    http::sse(rx)
+    http::sse(n.subscribe())
 }
 
 fn app_get_notification(h: &HeaderMap) -> Resp {
@@ -922,7 +882,9 @@ fn chair_post_coordinate(h: &HeaderMap, body: &[u8]) -> Resp {
         kick_matching();
     }
     drop(st);
-    json(200, format!("{{\"recorded_at\":{}}}", us_to_ms(t)).into_bytes())
+    let mut j = J(Vec::with_capacity(32));
+    j.raw("{\"recorded_at\":").int(us_to_ms(t)).raw("}");
+    json(200, j.0)
 }
 
 #[derive(Deserialize, Default)]

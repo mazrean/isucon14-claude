@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 pub enum Body {
     Full(Option<Bytes>),
-    Stream(mpsc::Receiver<Bytes>),
+    Stream(mpsc::UnboundedReceiver<Bytes>),
 }
 
 impl hyper::body::Body for Body {
@@ -85,7 +85,7 @@ pub fn method_not_allowed(allow: &'static str) -> Resp {
     r
 }
 
-pub fn sse(rx: mpsc::Receiver<Bytes>) -> Resp {
+pub fn sse(rx: mpsc::UnboundedReceiver<Bytes>) -> Resp {
     let mut r = Response::new(Body::Stream(rx));
     let h = r.headers_mut();
     h.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));

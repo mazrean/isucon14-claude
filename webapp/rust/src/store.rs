@@ -52,34 +52,74 @@ pub struct NotifInner {
     pub queue: Vec<Bytes>,
     pub last: Option<Bytes>,
     pub generation: u64,
+    /// 現在の通知ストリーム (SSE のレスポンスボディ)。繋がっている間は push が直接書き込む
+    tx: Option<tokio::sync::mpsc::UnboundedSender<Bytes>>,
+}
+
+/// SSE の 1 イベント分 ("data: <json>\n\n")
+fn sse_frame(out: &mut Vec<u8>, ev: &[u8]) {
+    out.extend_from_slice(b"data: ");
+    out.extend_from_slice(ev);
+    out.extend_from_slice(b"\n\n");
 }
 
 /// ユーザー / 椅子ごとの通知キュー (Go の Notifier)。push は STATE を持って行う
 pub struct Notifier {
     pub inner: Mutex<NotifInner>,
-    pub notify: tokio::sync::Notify,
 }
 
 impl Notifier {
     pub fn new() -> Arc<Notifier> {
-        Arc::new(Notifier { inner: Mutex::new(NotifInner { queue: Vec::new(), last: None, generation: 0 }), notify: tokio::sync::Notify::new() })
+        Arc::new(Notifier { inner: Mutex::new(NotifInner { queue: Vec::new(), last: None, generation: 0, tx: None }) })
     }
+    /// 通知ストリームが繋がっていればそこへ直接書き (中継タスクを起こさない)、無ければ次の接続まで溜める
     pub fn push(&self, ev: Bytes) {
-        self.inner.lock().queue.push(ev);
-        self.notify.notify_one();
+        let mut i = self.inner.lock();
+        if let Some(tx) = &i.tx {
+            let mut b = Vec::with_capacity(ev.len() + 8);
+            sse_frame(&mut b, &ev);
+            if tx.send(Bytes::from(b)).is_ok() {
+                i.last = Some(ev);
+                return;
+            }
+            i.tx = None;
+        }
+        i.queue.push(ev);
     }
-    /// 既存の接続を全て古い世代にする (新しいライドの作成時に呼ぶ)。
+    /// 新しい通知ストリームを張る。前の接続は閉じ (ボディが終わる)、未送信分 (無ければ最新) から送る
+    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<Bytes> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut i = self.inner.lock();
+        i.generation += 1;
+        i.tx = None;
+        let evs = i.take(true);
+        if !evs.is_empty() {
+            let mut b = Vec::with_capacity(1024);
+            for ev in &evs {
+                sse_frame(&mut b, ev);
+            }
+            let _ = tx.send(Bytes::from(b));
+        }
+        i.tx = Some(tx);
+        rx
+    }
+    /// 既存の接続を全て閉じる (新しいライドの作成時に呼ぶ)。
     /// ベンチはライドごとに通知ストリームを張り直すので、作成時点で生きている接続は前のライドのもの。
-    /// それが新しいライドの ENROUTE を取り出して閉じた接続に書くと、ベンチは ENROUTE を受け取れず、
+    /// それが新しいライドの ENROUTE を受け取って閉じた接続に書くと、ベンチは ENROUTE を受け取れず、
     /// 前のライドの検証済みイベントと比較して「配車位置が一致しません」になる。
     pub fn expire_streams(&self) {
-        self.inner.lock().generation += 1;
-        self.notify.notify_waiters();
+        let mut i = self.inner.lock();
+        i.generation += 1;
+        i.tx = None;
     }
     pub fn reset(&self, ev: Bytes) {
         let mut i = self.inner.lock();
         i.queue = Vec::new();
         i.last = Some(ev);
+    }
+    /// 終了時: 接続を閉じる
+    pub fn close(&self) {
+        self.inner.lock().tx = None;
     }
 }
 
@@ -818,6 +858,17 @@ pub fn persist_ride_status(r: &Ride, st: &RideStatus) {
 }
 
 /// 座標は履歴ではなく椅子ごとの集計 (最新位置・総移動距離・更新時刻) として保存する
+/// 終了時に全ての通知ストリームを閉じる (graceful shutdown が SSE を待ち続けないように)
+pub fn close_streams() {
+    let st = STATE.lock();
+    for u in &st.users {
+        u.notifier.close();
+    }
+    for c in &st.chairs {
+        c.notifier.close();
+    }
+}
+
 pub fn persist_chair_location(c: &Chair, t: i64) {
     persist::enqueue(
         persist::T_CHAIR_STATES,

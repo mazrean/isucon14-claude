@@ -134,6 +134,12 @@ impl J {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         let b = s.as_bytes();
         self.0.push(b'"');
+        // ほとんどの文字列 (ID・名前) はエスケープ不要なので一括コピー
+        if !b.iter().any(|&c| c < 0x20 || c == b'"' || c == b'\\' || c == b'<' || c == b'>' || c == b'&' || c == 0xE2) {
+            self.0.extend_from_slice(b);
+            self.0.push(b'"');
+            return self;
+        }
         let mut start = 0;
         let mut i = 0;
         while i < b.len() {

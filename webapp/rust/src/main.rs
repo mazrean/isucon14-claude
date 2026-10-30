@@ -157,7 +157,9 @@ async fn serve() {
         }
     }
     log_info!("shutting down");
-    let _ = SHUTDOWN.send(true);
+    SHUTDOWN.send_replace(true);
+    // SSE のボディを終わらせる (graceful shutdown が通知ストリームを待ち続けないように)
+    store::close_streams();
     drop(tcp);
     drop(uds);
     drop(tls);
