@@ -14,8 +14,8 @@ APP=${APP_HOST:-isucon14-2}
 DB=${DB_HOST:-isucon14-3}
 NGINX=${NGINX_HOST:-isucon14-1}
 # 追加の TLS 終端 nginx (NGINX ノードがカーネルの DNAT で新規接続を振り分ける)
-EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3 isucon14-2}
-LB_TARGETS=${LB_TARGETS:-10.100.0.19 10.100.0.176}
+EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3}
+LB_TARGETS=${LB_TARGETS:-10.100.0.19}
 # app と同居する nginx は unix domain socket で app に繋ぐ
 APP_SOCKET=${APP_SOCKET:-/run/isuride/app.sock}
 # address MySQL is reachable at from the app node
