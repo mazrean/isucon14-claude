@@ -200,7 +200,10 @@ fn tls_config() -> Result<rustls::ServerConfig, String> {
     let certs: Vec<CertificateDer<'static>> =
         CertificateDer::pem_file_iter(&cert_path).map_err(|e| format!("{cert_path}: {e}"))?.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
     let key = PrivateKeyDer::from_pem_file(&key_path).map_err(|e| format!("{key_path}: {e}"))?;
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    // 鍵交換は X25519 のみ (Go 1.26 のクライアントが提案する X25519MLKEM768 の大きな鍵共有を避ける。nginx と同じ)
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+    provider.kx_groups = vec![rustls::crypto::aws_lc_rs::kx_group::X25519];
+    let provider = Arc::new(provider);
     let mut cfg = rustls::ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .map_err(|e| e.to_string())?
