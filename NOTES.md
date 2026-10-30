@@ -49,6 +49,11 @@ make all                                          # deploy + bench (Makefile 参
 | (c7a.4xlarge) | ベンチを c7a.4xlarge に | 1670344, 1758711 |
 | (persist) | 座標を履歴でなく椅子ごとの集計で保存 (MySQL 負荷減) | 1783113, 1788217 |
 | (rust) | webapp/rust: Go 版を Rust (tokio + hyper 1, 単一 parking_lot Mutex) に移植。同一ロック内 A/B で app CPU idle Go 4-10% → Rust 39-43% (スコアはベンチ律速で同等) | Rust 1919691, 1905784 / Go 1869299, 1925843 |
+| 99644b4 | 実行時の MySQL 書き込みを廃止しローカル WAL に (起動時に MySQL へ流し込み) | 1787732, 1802633 |
+| f23d852 | nginx 1.28 + AWS-LC (Ubuntu の OpenSSL 3.0 から) | 1767277, 1789921 → 1856373, 1882062 |
+| 16aa7be | NIC 割り込み CPU 固定 / XPS / pfifo_fast (irqbalance 停止) | 1882467, 1923446 |
+| e559c2e | Rust 版を既定に、app ノードにも TLS (nginx-awslc, UDS, 1 worker, 重み 0.3) | 2019231, 2037817, 2022814 |
+| 1e937d3 | nginx ワーカー CPU 固定 + reuseport + SO_INCOMING_CPU パッチ | 2076181, 2027306 |
 
 ※ 90 万台は c5.large の帯域バーストクレジットに乗っていた。連続走行でクレジットが尽きると
   node1 の ENA bw_out_allowance_exceeded が増え (500 万パケット破棄)、再送・タイムアウトで崩れる。
@@ -79,6 +84,13 @@ make all                                          # deploy + bench (Makefile 参
   GET /rides 保留 (評価↑→ユーザー増→悪化 844k)、/assets を 304 方式 (887k/866k)、全静的 no-store (614k)。
 - 攻めの選択肢: components バンドルもキャッシュ可にすると ~915k だがベンチメモリ 7.0G/7.9G。
   town.svg までキャッシュすると 7.8G でベンチが固まった。固まると 0 点なので不採用。
+- 通知の競合 (CODE=33): ベンチは validatedRideNotificationEvent をライド間でリセットしない (ENROUTE で上書きのみ)。
+  前のライドのストリームが新ライドの ENROUTE を取って閉じた接続に書くと、新ライドは PICKUP しか届かず失敗する。
+  ライド作成時にユーザーの通知ストリームの世代を進めて解消 (da243fb)。
+- カーネル: reuseport_select_sock_by_hash() (net/core/sock_reuseport.c, 6.17) は SYN を処理した CPU と
+  sk_incoming_cpu が一致する listener を選ぶ → 割り込み・XPS・ワーカーを CPU 単位で揃えられる。
+- 未実施 (権限で止まった): `mitigations=off apparmor=0 audit=0` での起動 (scripts は未作成)。
+- 不採用: Go の TLS を app ノードで直接受ける (1585654, 1585492)、Go 版で app ノードに TLS (1.64M/1.61M)。
 - 計測: STATS=1 で 1 秒ごとに需給・区間時間をログ (journalctl -u isuride-go | grep stats)。
 
 ## Rust 版 (webapp/rust)
