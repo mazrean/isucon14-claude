@@ -60,6 +60,7 @@ func chairPostActivity(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	if chair.IsActive != req.IsActive {
 		chair.IsActive = req.IsActive
+		updateFree(chair)
 		chair.UpdatedAt = now()
 		persistChair(chair)
 		kickMatching()
@@ -88,6 +89,9 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 	}
 	first := !chair.HasLocation
 	chair.HasLocation = true
+	if first {
+		updateFree(chair)
+	}
 	chair.Latitude, chair.Longitude = req.Latitude, req.Longitude
 	chair.LocationAt = t
 	chair.TotalDistanceUpdatedAt = t

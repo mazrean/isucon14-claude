@@ -53,11 +53,9 @@ func runMatching() {
 	if len(waitingRides) == 0 {
 		return
 	}
-	free := make([]*Chair, 0, 64)
-	for _, c := range chairList {
-		if c.IsActive && !c.Busy && c.HasLocation && c.Speed > 0 {
-			free = append(free, c)
-		}
+	free := make([]*Chair, 0, len(freeChairs))
+	for c := range freeChairs {
+		free = append(free, c)
 	}
 	if len(free) == 0 {
 		return
@@ -156,6 +154,7 @@ func assign(r *Ride, c *Chair) {
 	r.UpdatedAt = now()
 	r.MatchedAt = r.UpdatedAt
 	c.Busy = true
+	updateFree(c)
 	c.NearbyGranted = 0
 	c.LastRide = r
 	persistRide(r)

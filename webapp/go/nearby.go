@@ -46,7 +46,7 @@ func nearbyVisible(c *Chair, recent time.Time) bool {
 func collectNearby(lat, lon, distance int) []appGetNearbyChairsResponseChair {
 	nearby := []appGetNearbyChairsResponseChair{}
 	recent := time.Now().Add(-nearbyCompletedGrace)
-	for _, c := range chairList {
+	for c := range freeChairs {
 		if !nearbyVisible(c, recent) {
 			continue
 		}
@@ -102,7 +102,7 @@ func dispatchNearby() {
 	now := time.Now()
 	visible := make([]*Chair, 0, 32)
 	slots := make([]*Chair, 0, 32)
-	for _, c := range chairList {
+	for c := range freeChairs {
 		if c.NearbyGranted > 0 && now.Sub(c.NearbyGrantAt) > nearbyGrantTTL {
 			// 起こしたユーザーのライドが別の椅子に割り当てられた場合など
 			c.NearbyGranted = 0

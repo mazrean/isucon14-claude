@@ -347,6 +347,7 @@ func appPostRideEvaluatation(w http.ResponseWriter, r *http.Request) {
 	c.EvaluationSum += req.Evaluation
 	c.Completed = append(c.Completed, ride)
 	c.Busy = false
+	updateFree(c)
 	addRideStatus(ride, "COMPLETED")
 	recordTimeline(ride)
 	kickMatching()

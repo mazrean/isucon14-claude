@@ -134,6 +134,7 @@ var (
 	chairs           map[string]*Chair
 	chairsByToken    map[string]*Chair
 	chairList        []*Chair
+	freeChairs       map[*Chair]struct{} // active・未割り当て・位置あり の椅子
 	rides            map[string]*Ride
 	waitingRides     []*Ride
 	chairModelSpeed  map[string]int
@@ -152,6 +153,7 @@ func resetStore() {
 	chairs = map[string]*Chair{}
 	chairsByToken = map[string]*Chair{}
 	chairList = nil
+	freeChairs = map[*Chair]struct{}{}
 	rides = map[string]*Ride{}
 	waitingRides = nil
 	chairModelSpeed = map[string]int{}
@@ -181,6 +183,15 @@ func completionTime() time.Time {
 	}
 	lastCompletedMs = t.UnixMilli()
 	return t
+}
+
+// 椅子の状態が変わったら呼ぶ。mu を保持して呼ぶ
+func updateFree(c *Chair) {
+	if c.IsActive && !c.Busy && c.HasLocation && c.Speed > 0 {
+		freeChairs[c] = struct{}{}
+	} else {
+		delete(freeChairs, c)
+	}
 }
 
 func addUser(u *User) {
@@ -421,6 +432,7 @@ func loadAll() error {
 		}
 	}
 	for _, c := range chairList {
+		updateFree(c)
 		sort.Slice(c.Completed, func(i, j int) bool { return c.Completed[i].UpdatedAt.Before(c.Completed[j].UpdatedAt) })
 	}
 	sort.Slice(waitingRides, func(i, j int) bool { return waitingRides[i].CreatedAt.Before(waitingRides[j].CreatedAt) })
