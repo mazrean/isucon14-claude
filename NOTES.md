@@ -107,6 +107,11 @@ make all                                          # deploy + bench (Makefile 参
 - 外部動作は Go と同じ (GET 系の応答・エラー応答を同じ DB 状態で突き合わせて差分なし。ヘッダ名の大小文字と順序のみ異なる)。
   /api/initialize の language だけ "rust"。PPROF は Go のみ。RUST_WORKERS で tokio のワーカー数 (既定 = CPU 数)。
 
+- app ノードの nginx を廃止し、Rust 版が TLS 1.3 + h2 を直受け (TLS_ADDR=:443, tokio-rustls/aws-lc-rs, 静的ファイルは
+  public/ をメモリに載せ nginx と同じヘッダ・gzip_static・SPA fallback。全ファイルの本文/ヘッダを node3 nginx と突き合わせ済み)。
+  同一ロック内 A/B: nginx+UDS 2338485/2371778 (CODE=24 x8/x5) → 直受け w=0.3 2438290/2335808, w=0.5 2518049/2422299 (エラー 0)。
+  node2 の idle はどれも 1-10% (飽和したまま、nginx の分を app が TLS に回せた)。既定は w=0.5。
+
 ## 方針
 
 1. Go 単一プロセスで全データをオンメモリ化。ミューテーションは行スナップショットの upsert として
