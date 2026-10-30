@@ -73,6 +73,12 @@ for h in $NGINX $EXTRA_NGINX; do
   [ "$h" = "$APP" ] && conf="$WORK/isuride-uds.conf"
   rs "$conf" "$h:/etc/nginx/sites-available/isuride.conf" --chown=root:root --chmod=F644
 done
+# ECDSA P-256 の自己署名証明書 (ベンチは証明書を検証しない。ハンドシェイクの署名が RSA 2048 より桁違いに軽い)。
+# nginx (root) と TLS を受ける app (isucon) の両方が読めるよう root:isucon 0640
+for h in $(printf '%s\n' "$NGINX" "$APP" $EXTRA_NGINX | sort -u); do
+  rs etc/nginx/tls/ "$h:/etc/nginx/tls/" --chown=root:isucon --chmod=F640 --include='*-ec.*' --exclude='*'
+done
+
 # AWS-LC 版 nginx (scripts/build-nginx-awslc.sh でビルド済みなら配る。切り替えは再起動時)
 for h in $NGINX $EXTRA_NGINX; do
   if [ -x build/nginx-awslc ]; then
@@ -100,7 +106,7 @@ done
 case " $NGINX $EXTRA_NGINX " in *" $APP "*) APP_TLS=0;; *) APP_TLS=${APP_TLS:-1};; esac
 if [ "$APP_TLS" = 1 ]; then
   echo "==> [$APP] app serves TLS :443 directly"
-  remote "$APP" "sudo mkdir -p /etc/systemd/system/isuride-go.service.d && printf '[Service]\nEnvironment=TLS_ADDR=:443\nEnvironment=TLS_CERT=/etc/nginx/tls/_.xiv.isucon.net.crt\nEnvironment=TLS_KEY=/etc/nginx/tls/_.xiv.isucon.net.key\n' | sudo tee /etc/systemd/system/isuride-go.service.d/tls.conf >/dev/null"
+  remote "$APP" "sudo mkdir -p /etc/systemd/system/isuride-go.service.d && printf '[Service]\nEnvironment=TLS_ADDR=:443\nEnvironment=TLS_CERT=/etc/nginx/tls/_.xiv.isucon.net-ec.crt\nEnvironment=TLS_KEY=/etc/nginx/tls/_.xiv.isucon.net-ec.key\n' | sudo tee /etc/systemd/system/isuride-go.service.d/tls.conf >/dev/null"
 else
   remote "$APP" "sudo rm -f /etc/systemd/system/isuride-go.service.d/tls.conf"
 fi
