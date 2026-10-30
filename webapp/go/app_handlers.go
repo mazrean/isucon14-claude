@@ -230,6 +230,8 @@ func appPostRides(w http.ResponseWriter, r *http.Request) {
 	user.Rides = append(user.Rides, ride)
 	rides[ride.ID] = ride
 	persistRide(ride)
+	// 前のライドの通知ストリームに新しいライドのイベントを取らせない
+	user.Notifier.expireStreams()
 	addRideStatus(ride, "MATCHING")
 	waitingRides = append(waitingRides, ride)
 	kickMatching()

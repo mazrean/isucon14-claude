@@ -404,6 +404,8 @@ fn app_post_rides(h: &HeaderMap, body: &[u8]) -> Resp {
     let fare = ride.fare();
     let id = ride.id.clone();
     st.rides.push(ride);
+    // 前のライドの通知ストリームに新しいライドのイベントを取らせない
+    st.users[ui as usize].notifier.expire_streams();
     st.add_ride_status(ri, St::Matching);
     st.waiting_rides.push(ri);
     kick_matching();

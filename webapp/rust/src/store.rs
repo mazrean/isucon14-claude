@@ -68,6 +68,14 @@ impl Notifier {
         self.inner.lock().queue.push(ev);
         self.notify.notify_one();
     }
+    /// 既存の接続を全て古い世代にする (新しいライドの作成時に呼ぶ)。
+    /// ベンチはライドごとに通知ストリームを張り直すので、作成時点で生きている接続は前のライドのもの。
+    /// それが新しいライドの ENROUTE を取り出して閉じた接続に書くと、ベンチは ENROUTE を受け取れず、
+    /// 前のライドの検証済みイベントと比較して「配車位置が一致しません」になる。
+    pub fn expire_streams(&self) {
+        self.inner.lock().generation += 1;
+        self.notify.notify_waiters();
+    }
     pub fn reset(&self, ev: Bytes) {
         let mut i = self.inner.lock();
         i.queue = Vec::new();

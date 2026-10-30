@@ -40,6 +40,18 @@ func (n *Notifier) push(ev notifyEvent) {
 	}
 }
 
+// 既存の接続を全て古い世代にする (新しいライドの作成時に呼ぶ)。
+// ベンチはライドごとに通知ストリームを張り直すので、作成時点で生きている接続は前のライドのもの。
+// それが新しいライドの ENROUTE を取り出して閉じた接続に書くと、ベンチは ENROUTE を受け取れず、
+// 前のライドの検証済みイベントと比較して「配車位置が一致しません」になる。
+func (n *Notifier) expireStreams() {
+	n.gen++
+	select {
+	case n.ch <- struct{}{}:
+	default:
+	}
+}
+
 func (n *Notifier) reset(ev notifyEvent) {
 	n.queue = nil
 	n.last = &ev
