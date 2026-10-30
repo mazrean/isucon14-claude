@@ -380,7 +380,7 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
+pub fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let z = z + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = z - era * 146097;
@@ -428,6 +428,25 @@ pub fn parse_datetime(s: &str) -> Option<i64> {
         }
     }
     Some(datetime_to_us(y, mo, d, h, mi, sec, us))
+}
+
+/// Unix 秒 → HTTP-date ("Thu, 31 Dec 2037 23:55:55 GMT")
+pub fn http_date(secs: i64) -> String {
+    const WD: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MON: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let days = secs.div_euclid(86400);
+    let sod = secs.rem_euclid(86400);
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
+        WD[days.rem_euclid(7) as usize],
+        d,
+        MON[(m - 1) as usize],
+        y,
+        sod / 3600,
+        sod / 60 % 60,
+        sod % 60
+    )
 }
 
 /// Unix µs → "YYYY-MM-DD HH:MM:SS.ffffff"
@@ -520,6 +539,12 @@ mod tests {
             assert_eq!(n.len(), 26);
             prev = n;
         }
+    }
+
+    #[test]
+    fn http_dates() {
+        assert_eq!(http_date(2145916555), "Thu, 31 Dec 2037 23:55:55 GMT");
+        assert_eq!(http_date(1787047428), "Tue, 18 Aug 2026 10:03:48 GMT");
     }
 
     #[test]

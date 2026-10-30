@@ -9,6 +9,7 @@ mod payment;
 mod persist;
 mod stats;
 mod store;
+mod tls;
 mod util;
 
 use hyper::server::conn::http1;
@@ -133,6 +134,8 @@ async fn serve() {
     let mut sigint = signal(SignalKind::interrupt()).unwrap();
     let mut sigquit = signal(SignalKind::quit()).unwrap();
     let graceful = GracefulShutdown::new();
+    // TLS_ADDR があれば TLS + h2 を直受けする (app ノードの nginx を省く)
+    let tls = tls::bind().await;
     log_info!("Listening on :8080");
     loop {
         tokio::select! {
@@ -147,6 +150,7 @@ async fn serve() {
                     serve_conn(&graceful, s);
                 }
             }
+            _ = async { match &tls { Some(t) => t.accept(&graceful).await, None => std::future::pending().await } } => {}
             _ = sigterm.recv() => break,
             _ = sigint.recv() => break,
             _ = sigquit.recv() => break,
@@ -156,6 +160,7 @@ async fn serve() {
     let _ = SHUTDOWN.send(true);
     drop(tcp);
     drop(uds);
+    drop(tls);
     tokio::select! {
         _ = graceful.shutdown() => {}
         _ = tokio::time::sleep(Duration::from_secs(10)) => {}

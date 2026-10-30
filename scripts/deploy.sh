@@ -94,6 +94,15 @@ for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
   remote "$h" "sudo systemctl daemon-reload && sudo systemctl disable -q irqbalance 2>/dev/null; sudo systemctl enable -q isucon-net-tune && sudo systemctl restart isucon-net-tune"
 done
 
+# app ノードに nginx を置かない場合は Rust 版が TLS + h2 を直受けする (TLS_ADDR、drop-in で切り替え)
+case " $NGINX $EXTRA_NGINX " in *" $APP "*) APP_TLS=0;; *) APP_TLS=${APP_TLS:-1};; esac
+if [ "$APP_TLS" = 1 ]; then
+  echo "==> [$APP] app serves TLS :443 directly"
+  remote "$APP" "sudo mkdir -p /etc/systemd/system/isuride-go.service.d && printf '[Service]\nEnvironment=TLS_ADDR=:443\nEnvironment=TLS_CERT=/etc/nginx/tls/_.xiv.isucon.net.crt\nEnvironment=TLS_KEY=/etc/nginx/tls/_.xiv.isucon.net.key\n' | sudo tee /etc/systemd/system/isuride-go.service.d/tls.conf >/dev/null"
+else
+  remote "$APP" "sudo rm -f /etc/systemd/system/isuride-go.service.d/tls.conf"
+fi
+
 # every node: stop services it does not own
 for h in $(printf '%s\n' "$APP" "$NGINX" "$DB" $EXTRA_NGINX | sort -u); do
   ROLES=""

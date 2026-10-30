@@ -12,14 +12,16 @@ bytes = "1"
 crc32fast = "1"
 http-body = "1"
 http-body-util = "0.1"
-hyper = { version = "1", features = ["server", "client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "client-legacy", "http1"] }
+hyper = { version = "1", features = ["server", "client", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "server-auto", "client-legacy", "http1", "http2"] }
 itoa = "1"
 mimalloc = { version = "0.1", default-features = false }
 mysql = { version = "28", default-features = false, features = ["minimal-rust"] }
 parking_lot = "0.12"
 rand = "0.9"
 rustc-hash = "2"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "signal", "sync", "macros"] }
