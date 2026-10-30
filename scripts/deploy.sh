@@ -19,7 +19,7 @@ NGINX=${NGINX_HOST:-isucon14-1}
 EXTRA_NGINX=${EXTRA_NGINX_HOSTS:-isucon14-3}
 # "ip:重み"。本ノード (NGINX) の重みは LB_SELF_WEIGHT。app ノード (Rust 版 TLS 直受け) は 0.5
 # (nginx+UDS 時代: 0.3: 2.02M/2.04M, 0.5: 1.99M/1.98M, 0.8: 1.96M/1.84M。Go 版のときは TLS を持たせると悪化した)
-LB_TARGETS=${LB_TARGETS:-10.100.0.19:1 10.100.0.176:0.5}
+LB_TARGETS=${LB_TARGETS:-10.100.0.19:1.3 10.100.0.176:0.5}
 LB_SELF_WEIGHT=${LB_SELF_WEIGHT:-0.75}
 # app と同居する nginx は unix domain socket で app に繋ぐ
 APP_SOCKET=${APP_SOCKET:-/run/isuride/app.sock}
